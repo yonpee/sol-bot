@@ -10,18 +10,12 @@ const { addPosition, positions } = require("./portfolio");
 // ============================================================
 // 🔧 トレンド検知の設定
 // ============================================================
-const TREND_CONFIG = {
-  // 5分間の上昇率の条件（%）
-  MIN_PRICE_CHANGE_5M: 2,
-  // 流動性の最低ライン（ドル）
-  MIN_LIQUIDITY_USD: 500,
-  // 24時間出来高の最低ライン
-  MIN_VOLUME_24H: 10000,
-  // 最大保有ポジション数（同時に何個まで買うか）
-  MAX_POSITIONS: 3,
-  // 監視するチェーン
+constconst TREND_CONFIG = {
+  MIN_PRICE_CHANGE_5M: -100, ← 条件なし
+  MIN_LIQUIDITY_USD: 100,   ← ほぼ条件なし
+  MIN_VOLUME_24H: 0,        ← 条件なし
+  MAX_POSITIONS: 1,         ← 1件だけ
   CHAINS: ["solana"],
-};
 
 // 購入済みトークンを記録（重複購入防止）
 const purchasedTokens = new Set();
