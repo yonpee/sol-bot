@@ -4,7 +4,7 @@ const { buyToken } = require("./trader");
 const { addPosition, positions } = require("./portfolio");
 
 const PUMPFUN_CONFIG = {
-  MAX_POSITIONS: 3,
+  MAX_POSITIONS: 1,
 };
 
 let ws = null;
@@ -55,7 +55,7 @@ async function handleNewToken(token) {
   console.log(`🆕 新規上場検知: ${token.name} ($${token.symbol})`);
 
   if (positions.length >= PUMPFUN_CONFIG.MAX_POSITIONS) {
-    console.log("最大ポジション数に達しています");
+    console.log("ポジション保有中 → スキップ");
     return;
   }
 
@@ -67,8 +67,6 @@ async function handleNewToken(token) {
   }
 
   console.log(`購入試行: ${token.mint}`);
-
-  // isPumpFun=true でPumpFun APIを使う
   const tradeResult = await buyToken(token.mint, solPriceUsd, true);
 
   if (tradeResult) {
