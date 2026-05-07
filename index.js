@@ -2,7 +2,7 @@ require("dotenv").config();
 const cron = require("node-cron");
 const { getSolanaPrice } = require("./priceChecker");
 const { sendDiscordNotification, sendStartupNotification } = require("./notifier");
-const { checkNewListings } = require("./newListing");
+const { checkTrends } = require("./trendScanner");
 const { monitorPositions } = require("./portfolio");
 
 const CONFIG = {
@@ -70,20 +70,20 @@ async function checkPrice() {
 }
 
 async function startBot() {
-  console.log("🚀 Solana Trade Bot 起動中...");
+  console.log("🚀 Solana Trend Bot 起動中...");
   checkEnvironmentVariables();
   await sendStartupNotification(CONFIG);
 
   const priceData = await checkPrice();
   if (priceData) {
-    await checkNewListings(priceData.price);
+    await checkTrends(priceData.price);
     await monitorPositions();
   }
 
   cron.schedule(`*/${CONFIG.CHECK_INTERVAL_MINUTES} * * * *`, async () => {
     const pd = await checkPrice();
     if (pd) {
-      await checkNewListings(pd.price);
+      await checkTrends(pd.price);
       await monitorPositions();
     }
   });
