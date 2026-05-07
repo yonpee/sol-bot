@@ -1,15 +1,12 @@
-app = "sol-bot"
+app = "sol-bot-yonpee"
 primary_region = "nrt"
 
 [build]
-  builder = "heroku/buildpacks:20"
-
-[env]
-  NODE_ENV = "production"
+  [build.args]
+    NODE_VERSION = "18"
 
 [processes]
   app = "node index.js"
 
-[[services]]
-  internal_port = 3000
-  protocol = "tcp"
+[env]
+  NODE_ENV = "production"
