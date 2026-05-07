@@ -6,7 +6,7 @@ const { checkTrends } = require("./trendScanner");
 const { monitorPositions } = require("./portfolio");
 
 const CONFIG = {
-  CHECK_INTERVAL_MINUTES: 3,
+  CHECK_INTERVAL_MINUTES: 1,
   PRICE_HISTORY_MINUTES: 5,
   DROP_THRESHOLD_PERCENT: 3.0,
 };
