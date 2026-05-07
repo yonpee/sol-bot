@@ -14,7 +14,7 @@ const TREND_CONFIG = {
   // 5分間の上昇率の条件（%）
   MIN_PRICE_CHANGE_5M: 5,
   // 流動性の最低ライン（ドル）
-  MIN_LIQUIDITY_USD: 5000,
+  MIN_LIQUIDITY_USD: 500,
   // 24時間出来高の最低ライン
   MIN_VOLUME_24H: 10000,
   // 最大保有ポジション数（同時に何個まで買うか）
