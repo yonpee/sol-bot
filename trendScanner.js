@@ -4,47 +4,24 @@ const { addPosition, positions } = require("./portfolio");
 
 const SOL_ADDRESS = "So11111111111111111111111111111111111111112";
 
-const LISTING_CONFIG = {
-  NEW_LISTING_MINUTES: 30,
-  MIN_LIQUIDITY_USD: 5000,
+// Raydiumで確実に売買できる有名コイン
+const WATCH_TOKENS = [
+  { symbol: "JUP", address: "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN" },
+  { symbol: "BONK", address: "DezXAZ8z7PnrnRJjz3wXBoRgiqCmbVeDbroIkLbCk5" },
+  { symbol: "WIF", address: "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm" },
+  { symbol: "POPCAT", address: "7GCihgDB8fe6KNjn2MYtkzZcRjQy3t9GHdC8uHYmW2hr" },
+  { symbol: "MYRO", address: "HhJpBhRRn4g56VsyLuT8DL5Bv31HkXqsrahTTUCZeZg4" },
+  { symbol: "BOME", address: "ukHH6c7mMyiWCf1b9pnWe25TSpkDDt3H5pQZgZ74J82" },
+];
+
+const TRADE_CONFIG_LOCAL = {
+  MIN_PRICE_CHANGE_5M: 2,
   MAX_POSITIONS: 1,
-  CHAINS: ["solana"],
 };
 
 const purchasedTokens = new Set();
 
-async function getNewListings() {
-  try {
-    const response = await axios.get(
-      "https://api.dexscreener.com/token-profiles/latest/v1",
-      { timeout: 10000, headers: { "User-Agent": "SolanaBot/1.0" } }
-    );
-
-    const data = response.data;
-    if (!data || data.length === 0) return [];
-
-    console.log(`取得トークン数: ${data.length}`);
-
-    const now = Date.now();
-    const cutoffTime = LISTING_CONFIG.NEW_LISTING_MINUTES * 60 * 1000;
-
-    const filtered = data.filter((token) => {
-      if (token.chainId !== "solana") return false;
-      if (!token.tokenAddress) return false;
-      if (token.tokenAddress === SOL_ADDRESS) return false;
-      if (purchasedTokens.has(token.tokenAddress)) return false;
-      return true;
-    });
-
-    console.log(`Solanaの新規トークン: ${filtered.length}件`);
-    return filtered;
-  } catch (error) {
-    console.error("新規上場データ取得エラー:", error.message);
-    return [];
-  }
-}
-
-async function getTokenInfo(tokenAddress) {
+async function getTokenPrice(tokenAddress) {
   try {
     const response = await axios.get(
       `https://api.dexscreener.com/latest/dex/tokens/${tokenAddress}`,
@@ -62,21 +39,14 @@ async function getTokenInfo(tokenAddress) {
       return currLiq > bestLiq ? current : best;
     }, solanaPairs[0]);
 
-    const liquidity = parseFloat(bestPair.liquidity?.usd || 0);
-    if (liquidity < LISTING_CONFIG.MIN_LIQUIDITY_USD) {
-      console.log(`流動性不足: $${liquidity.toFixed(0)} < $${LISTING_CONFIG.MIN_LIQUIDITY_USD}`);
-      return null;
-    }
-
-    console.log(`流動性OK: $${liquidity.toFixed(0)} | ${bestPair.baseToken?.symbol}`);
     return bestPair;
   } catch (error) {
-    console.error("トークン情報取得エラー:", error.message);
+    console.error(`価格取得エラー (${tokenAddress}):`, error.message);
     return null;
   }
 }
 
-async function sendBuyNotification(pair, tradeResult) {
+async function sendBuyNotification(pair, symbol, tradeResult) {
   const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
   if (!webhookUrl) return;
 
@@ -86,28 +56,28 @@ async function sendBuyNotification(pair, tradeResult) {
     hour: "2-digit", minute: "2-digit", second: "2-digit",
   }).format(new Date());
 
-  const liquidity = parseFloat(pair.liquidity?.usd || 0);
   const priceChange5m = parseFloat(pair.priceChange?.m5 || 0);
+  const liquidity = parseFloat(pair.liquidity?.usd || 0);
   const dexLink = `https://dexscreener.com/${pair.chainId}/${pair.pairAddress}`;
 
   const payload = {
-    content: "🆕 **新規上場コイン自動購入！** @everyone",
+    content: "📈 **上昇トレンドコイン自動購入！** @everyone",
     embeds: [{
-      title: `🚀 ${pair.baseToken?.name || "不明"} ($${pair.baseToken?.symbol || "?"})`,
-      color: 0x00ffff,
+      title: `🚀 ${pair.baseToken?.name || symbol} ($${symbol})`,
+      color: 0x00ff00,
       fields: [
         { name: "💰 購入価格", value: `$${parseFloat(pair.priceUsd || 0).toFixed(8)}`, inline: true },
-        { name: "📈 5分変化", value: `${priceChange5m.toFixed(2)}%`, inline: true },
-        { name: "💧 流動性", value: `$${liquidity.toLocaleString()}`, inline: true },
+        { name: "📈 5分変化", value: `+${priceChange5m.toFixed(2)}%`, inline: true },
+        { name: "💧 流動性", value: `$${(liquidity / 1000000).toFixed(2)}M`, inline: true },
         { name: "💵 購入金額", value: tradeResult ? "$5" : "失敗", inline: true },
-        { name: "🎯 利確", value: "+50%", inline: true },
+        { name: "🎯 利確", value: "+10%", inline: true },
         { name: "🔴 損切り", value: "-30%", inline: true },
         { name: "🔗 DexScreener", value: `[チャートを見る](${dexLink})`, inline: false },
         tradeResult
           ? { name: "🔗 購入TX", value: `[確認する](https://solscan.io/tx/${tradeResult.txid})`, inline: false }
           : { name: "購入結果", value: "失敗", inline: false },
       ],
-      footer: { text: `Solana New Listing Bot | ${jstTime} JST` },
+      footer: { text: `Solana Trade Bot | ${jstTime} JST` },
     }],
   };
 
@@ -122,42 +92,42 @@ async function sendBuyNotification(pair, tradeResult) {
 }
 
 async function checkTrends(solPriceUsd) {
-  console.log("🆕 新規上場チェック中...");
+  console.log("📈 有名コイン監視中...");
 
-  if (positions.length >= LISTING_CONFIG.MAX_POSITIONS) {
+  if (positions.length >= TRADE_CONFIG_LOCAL.MAX_POSITIONS) {
     console.log("最大ポジション数に達しています");
     return;
   }
 
-  const newListings = await getNewListings();
-  if (newListings.length === 0) {
-    console.log("新規上場なし");
-    return;
-  }
+  for (const token of WATCH_TOKENS) {
+    if (positions.length >= TRADE_CONFIG_LOCAL.MAX_POSITIONS) break;
+    if (purchasedTokens.has(token.address)) continue;
 
-  for (const token of newListings.slice(0, 5)) {
-    if (positions.length >= LISTING_CONFIG.MAX_POSITIONS) break;
-
-    const pair = await getTokenInfo(token.tokenAddress);
+    const pair = await getTokenPrice(token.address);
     if (!pair) continue;
 
-    const symbol = pair.baseToken?.symbol || "不明";
-    console.log(`購入試行: ${symbol}`);
+    const priceChange5m = parseFloat(pair.priceChange?.m5 || 0);
+    console.log(`${token.symbol}: 5m変化 ${priceChange5m.toFixed(2)}%`);
 
-    const tradeResult = await buyToken(token.tokenAddress, solPriceUsd);
+    // 5分で2%以上上昇していたら購入
+    if (priceChange5m >= TRADE_CONFIG_LOCAL.MIN_PRICE_CHANGE_5M) {
+      console.log(`🎯 購入条件達成: ${token.symbol} +${priceChange5m.toFixed(2)}%`);
 
-    if (tradeResult) {
-      addPosition(tradeResult);
-      purchasedTokens.add(token.tokenAddress);
-      console.log(`✅ 購入成功: ${symbol}`);
-      await sendBuyNotification(pair, tradeResult);
-      break;
-    } else {
-      console.log(`❌ 購入失敗: ${symbol} → 次のコインへ`);
-      await sendBuyNotification(pair, null);
+      const tradeResult = await buyToken(token.address, solPriceUsd);
+
+      if (tradeResult) {
+        addPosition(tradeResult);
+        purchasedTokens.add(token.address);
+        console.log(`✅ 購入成功: ${token.symbol}`);
+        await sendBuyNotification(pair, token.symbol, tradeResult);
+        break;
+      } else {
+        console.log(`❌ 購入失敗: ${token.symbol}`);
+        await sendBuyNotification(pair, token.symbol, null);
+      }
     }
 
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    await new Promise((resolve) => setTimeout(resolve, 500));
   }
 }
 
