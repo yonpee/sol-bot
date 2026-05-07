@@ -18,7 +18,7 @@ const purchasedTokens = new Set();
 async function getTrendingTokens() {
   try {
     const response = await axios.get(
-      "https://api.dexscreener.com/latest/dex/search?q=solana",
+      "https://api.dexscreener.com/latest/dex/search?q=meme",
       { timeout: 10000, headers: { "User-Agent": "SolanaBot/1.0" } }
     );
     const data = response.data;
