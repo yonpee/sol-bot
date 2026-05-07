@@ -10,7 +10,7 @@ const { addPosition, positions } = require("./portfolio");
 // ============================================================
 // 🔧 トレンド検知の設定
 // ============================================================
-constconst TREND_CONFIG = {
+const TREND_CONFIG = {
   MIN_PRICE_CHANGE_5M: -100, ← 条件なし
   MIN_LIQUIDITY_USD: 100,   ← ほぼ条件なし
   MIN_VOLUME_24H: 0,        ← 条件なし
