@@ -3,8 +3,8 @@ const { buyToken } = require("./trader");
 const { addPosition } = require("./portfolio");
 
 const LISTING_CONFIG = {
-  NEW_LISTING_MINUTES: 1,
-  MIN_LIQUIDITY_USD: 10000,
+  NEW_LISTING_MINUTES: 30,
+  MIN_LIQUIDITY_USD: 1000,
   CHAIN: "solana",
 };
 
