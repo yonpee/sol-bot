@@ -3,7 +3,6 @@ const { buyToken } = require("./trader");
 const { addPosition, positions } = require("./portfolio");
 
 const SOL_ADDRESS = "So11111111111111111111111111111111111111112";
-const WSOL_ADDRESS = "So11111111111111111111111111111111111111112";
 
 const TREND_CONFIG = {
   MIN_PRICE_CHANGE_5M: -100,
@@ -18,42 +17,63 @@ const purchasedTokens = new Set();
 async function getTrendingTokens() {
   try {
     const response = await axios.get(
-      "https://api.dexscreener.com/latest/dex/search?q=meme",
+      "https://api.dexscreener.com/token-boosts/top/v1",
       { timeout: 10000, headers: { "User-Agent": "SolanaBot/1.0" } }
     );
+
     const data = response.data;
-    if (!data.pairs || data.pairs.length === 0) return [];
+    if (!data || data.length === 0) return [];
 
-    console.log(`取得ペア数: ${data.pairs.length}`);
+    console.log(`取得トークン数: ${data.length}`);
 
-    const trendingPairs = data.pairs.filter((pair) => {
-      if (!TREND_CONFIG.CHAINS.includes(pair.chainId)) return false;
-      if (pair.baseToken?.address === SOL_ADDRESS) return false;
-      if (pair.baseToken?.address === WSOL_ADDRESS) return false;
-      if (pair.baseToken?.symbol === "SOL") return false;
-      if (pair.baseToken?.symbol === "WSOL") return false;
-      const liquidity = parseFloat(pair.liquidity?.usd || 0);
-      if (liquidity < TREND_CONFIG.MIN_LIQUIDITY_USD) return false;
-      const priceChange5m = parseFloat(pair.priceChange?.m5 || 0);
-      if (priceChange5m < TREND_CONFIG.MIN_PRICE_CHANGE_5M) return false;
-      if (purchasedTokens.has(pair.baseToken?.address)) return false;
-      if (!pair.priceUsd || parseFloat(pair.priceUsd) <= 0) return false;
-      if (!pair.baseToken?.address) return false;
+    const filtered = data.filter((token) => {
+      if (token.chainId !== "solana") return false;
+      if (!token.tokenAddress) return false;
+      if (token.tokenAddress === SOL_ADDRESS) return false;
+      if (purchasedTokens.has(token.tokenAddress)) return false;
       return true;
     });
 
-    trendingPairs.sort((a, b) => {
-      return parseFloat(b.priceChange?.m5 || 0) - parseFloat(a.priceChange?.m5 || 0);
-    });
-
-    console.log(`対象コイン: ${trendingPairs.length}件`);
-    if (trendingPairs.length > 0) {
-      console.log(`1位: ${trendingPairs[0].baseToken?.symbol} (${trendingPairs[0].baseToken?.address})`);
+    console.log(`対象コイン: ${filtered.length}件`);
+    if (filtered.length > 0) {
+      console.log(`1位: ${filtered[0].tokenAddress}`);
     }
-    return trendingPairs;
+    return filtered;
   } catch (error) {
     console.error("トレンドデータ取得エラー:", error.message);
     return [];
+  }
+}
+
+async function getTokenInfo(tokenAddress) {
+  try {
+    const response = await axios.get(
+      `https://api.dexscreener.com/latest/dex/tokens/${tokenAddress}`,
+      { timeout: 10000 }
+    );
+    const data = response.data;
+    if (!data.pairs || data.pairs.length === 0) return null;
+
+    const bestPair = data.pairs
+      .filter(p => p.chainId === "solana")
+      .reduce((best, current) => {
+        const bestLiq = parseFloat(best?.liquidity?.usd || 0);
+        const currLiq = parseFloat(current.liquidity?.usd || 0);
+        return currLiq > bestLiq ? current : best;
+      }, null);
+
+    if (!bestPair) return null;
+
+    const liquidity = parseFloat(bestPair.liquidity?.usd || 0);
+    if (liquidity < TREND_CONFIG.MIN_LIQUIDITY_USD) {
+      console.log(`流動性不足: $${liquidity.toLocaleString()} < $${TREND_CONFIG.MIN_LIQUIDITY_USD.toLocaleString()}`);
+      return null;
+    }
+
+    return bestPair;
+  } catch (error) {
+    console.error("トークン情報取得エラー:", error.message);
+    return null;
   }
 }
 
@@ -77,7 +97,7 @@ async function sendTrendBuyNotification(pair, tradeResult) {
       title: `🚀 ${pair.baseToken?.name || "不明"} ($${pair.baseToken?.symbol || "?"})`,
       color: 0x00ff00,
       fields: [
-        { name: "💰 購入価格", value: `$${parseFloat(pair.priceUsd).toFixed(8)}`, inline: true },
+        { name: "💰 購入価格", value: `$${parseFloat(pair.priceUsd || 0).toFixed(8)}`, inline: true },
         { name: "📈 5分変化", value: `${priceChange5m.toFixed(2)}%`, inline: true },
         { name: "💧 流動性", value: `$${liquidity.toLocaleString()}`, inline: true },
         { name: "💵 購入金額", value: tradeResult ? "$5" : "失敗", inline: true },
@@ -111,27 +131,33 @@ async function checkTrends(solPriceUsd) {
   }
 
   const trendingTokens = await getTrendingTokens();
-
   if (trendingTokens.length === 0) {
-    console.log("上昇トレンドのコインなし");
+    console.log("対象コインなし");
     return;
   }
 
-  const target = trendingTokens[0];
-  const symbol = target.baseToken?.symbol || "不明";
-  console.log(`購入試行: ${symbol} (${target.baseToken?.address})`);
+  for (const token of trendingTokens) {
+    if (positions.length >= TREND_CONFIG.MAX_POSITIONS) break;
 
-  const tradeResult = await buyToken(target.baseToken.address, solPriceUsd);
+    const pair = await getTokenInfo(token.tokenAddress);
+    if (!pair) continue;
 
-  if (tradeResult) {
-    addPosition(tradeResult);
-    purchasedTokens.add(target.baseToken.address);
-    console.log(`✅ 購入成功: ${symbol}`);
-  } else {
-    console.log(`❌ 購入失敗: ${symbol}`);
+    const symbol = pair.baseToken?.symbol || "不明";
+    console.log(`購入試行: ${symbol} 流動性: $${parseFloat(pair.liquidity?.usd || 0).toLocaleString()}`);
+
+    const tradeResult = await buyToken(token.tokenAddress, solPriceUsd);
+
+    if (tradeResult) {
+      addPosition(tradeResult);
+      purchasedTokens.add(token.tokenAddress);
+      console.log(`✅ 購入成功: ${symbol}`);
+    } else {
+      console.log(`❌ 購入失敗: ${symbol}`);
+    }
+
+    await sendTrendBuyNotification(pair, tradeResult);
+    await new Promise((resolve) => setTimeout(resolve, 1000));
   }
-
-  await sendTrendBuyNotification(target, tradeResult);
 }
 
 module.exports = { checkTrends };
