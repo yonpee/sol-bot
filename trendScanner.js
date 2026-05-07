@@ -2,16 +2,31 @@ const axios = require("axios");
 const { buyToken } = require("./trader");
 const { addPosition, positions } = require("./portfolio");
 
-const SOL_ADDRESS = "So11111111111111111111111111111111111111112";
-
-// Raydiumで確実に売買できる有名コイン
+// Raydiumで売買できる有名コイン一覧
 const WATCH_TOKENS = [
-  { symbol: "JUP", address: "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN" },
+  // ミームコイン
   { symbol: "BONK", address: "DezXAZ8z7PnrnRJjz3wXBoRgiqCmbVeDbroIkLbCk5" },
   { symbol: "WIF", address: "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm" },
   { symbol: "POPCAT", address: "7GCihgDB8fe6KNjn2MYtkzZcRjQy3t9GHdC8uHYmW2hr" },
   { symbol: "MYRO", address: "HhJpBhRRn4g56VsyLuT8DL5Bv31HkXqsrahTTUCZeZg4" },
   { symbol: "BOME", address: "ukHH6c7mMyiWCf1b9pnWe25TSpkDDt3H5pQZgZ74J82" },
+  { symbol: "SLERF", address: "7BgBvyjrZX1YKz4oh9mjb8ZScatkkwb8DzFx7LoiVkM3" },
+  { symbol: "DOGGO", address: "5LSFpvLDkcdV2a3Kiyzmg5YcJd4HnGqkRcVd8q8T1J9" },
+  { symbol: "MEW", address: "MEW1gQWJ3nEXg2qgERiKu7FAFj79PHvQVREQUzScPP5" },
+  { symbol: "PENG", address: "A3eME5CetyZPBoWbRUwY3tSe25S6tb18ba9ZPbWk9eFJ" },
+  { symbol: "GIGA", address: "63LfDmNb3MQ8mw9MtZ2To9bEA2M71kZUUGq5tiJxcqj9" },
+  // AIコイン
+  { symbol: "GOAT", address: "CzLSujWBLFsSjncfkh59rUFqvafWcY5tzedWJSuypump" },
+  { symbol: "AI16Z", address: "HeLp6NuQkmYB4pYWo2zYs22mESHXPQYzXbB8n4V98jwC" },
+  { symbol: "AIXBT", address: "AIXBT9mdTvjSvCLBSiCXNSgS3rVkJRPhMhVCZVQYpump" },
+  { symbol: "FARTCOIN", address: "9BB6NFEcjBCtnNLFko2FqVQBq8HHM13kCyYcdQbgpump" },
+  { symbol: "ARC", address: "61V8vBaqAGMpgDQi4JcAwo1dmBGHsyhzodcPqnEVpump" },
+  { symbol: "ZEREBRO", address: "8x5VqbHA8D7NkD52uNuS5nnt3PwA8pLD34ymskeSo2Wn" },
+  // DeFiコイン
+  { symbol: "JUP", address: "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN" },
+  { symbol: "RAY", address: "4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R" },
+  { symbol: "PYTH", address: "HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3" },
+  { symbol: "ORCA", address: "orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE" },
 ];
 
 const TRADE_CONFIG_LOCAL = {
@@ -33,13 +48,11 @@ async function getTokenPrice(tokenAddress) {
     const solanaPairs = data.pairs.filter(p => p.chainId === "solana");
     if (solanaPairs.length === 0) return null;
 
-    const bestPair = solanaPairs.reduce((best, current) => {
+    return solanaPairs.reduce((best, current) => {
       const bestLiq = parseFloat(best?.liquidity?.usd || 0);
       const currLiq = parseFloat(current.liquidity?.usd || 0);
       return currLiq > bestLiq ? current : best;
     }, solanaPairs[0]);
-
-    return bestPair;
   } catch (error) {
     console.error(`価格取得エラー (${tokenAddress}):`, error.message);
     return null;
@@ -92,43 +105,51 @@ async function sendBuyNotification(pair, symbol, tradeResult) {
 }
 
 async function checkTrends(solPriceUsd) {
-  console.log("📈 有名コイン監視中...");
+  console.log("📈 コイン監視中...");
 
   if (positions.length >= TRADE_CONFIG_LOCAL.MAX_POSITIONS) {
     console.log("最大ポジション数に達しています");
     return;
   }
 
-  for (const token of WATCH_TOKENS) {
-    if (positions.length >= TRADE_CONFIG_LOCAL.MAX_POSITIONS) break;
-    if (purchasedTokens.has(token.address)) continue;
+  const results = [];
 
+  for (const token of WATCH_TOKENS) {
+    if (purchasedTokens.has(token.address)) continue;
     const pair = await getTokenPrice(token.address);
     if (!pair) continue;
-
     const priceChange5m = parseFloat(pair.priceChange?.m5 || 0);
-    console.log(`${token.symbol}: 5m変化 ${priceChange5m.toFixed(2)}%`);
-
-    // 5分で2%以上上昇していたら購入
     if (priceChange5m >= TRADE_CONFIG_LOCAL.MIN_PRICE_CHANGE_5M) {
-      console.log(`🎯 購入条件達成: ${token.symbol} +${priceChange5m.toFixed(2)}%`);
-
-      const tradeResult = await buyToken(token.address, solPriceUsd);
-
-      if (tradeResult) {
-        addPosition(tradeResult);
-        purchasedTokens.add(token.address);
-        console.log(`✅ 購入成功: ${token.symbol}`);
-        await sendBuyNotification(pair, token.symbol, tradeResult);
-        break;
-      } else {
-        console.log(`❌ 購入失敗: ${token.symbol}`);
-        await sendBuyNotification(pair, token.symbol, null);
-      }
+      results.push({ token, pair, priceChange5m });
     }
-
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await new Promise((resolve) => setTimeout(resolve, 300));
   }
+
+  if (results.length === 0) {
+    console.log("購入条件を満たすコインなし");
+    return;
+  }
+
+  // 上昇率が高い順に並べる
+  results.sort((a, b) => b.priceChange5m - a.priceChange5m);
+  console.log(`購入候補: ${results.length}件`);
+  results.forEach(r => console.log(`  ${r.token.symbol}: +${r.priceChange5m.toFixed(2)}%`));
+
+  // 一番上昇率が高いコインを購入
+  const best = results[0];
+  console.log(`🎯 購入: ${best.token.symbol} +${best.priceChange5m.toFixed(2)}%`);
+
+  const tradeResult = await buyToken(best.token.address, solPriceUsd);
+
+  if (tradeResult) {
+    addPosition(tradeResult);
+    purchasedTokens.add(best.token.address);
+    console.log(`✅ 購入成功: ${best.token.symbol}`);
+  } else {
+    console.log(`❌ 購入失敗: ${best.token.symbol}`);
+  }
+
+  await sendBuyNotification(best.pair, best.token.symbol, tradeResult);
 }
 
 module.exports = { checkTrends };
