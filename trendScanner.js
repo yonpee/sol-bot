@@ -2,6 +2,8 @@ const axios = require("axios");
 const { buyToken } = require("./trader");
 const { addPosition, positions } = require("./portfolio");
 
+const SOL_ADDRESS = "So11111111111111111111111111111111111111112";
+
 const TREND_CONFIG = {
   MIN_PRICE_CHANGE_5M: -100,
   MIN_LIQUIDITY_USD: 100,
@@ -21,32 +23,30 @@ async function getTrendingTokens() {
     const data = response.data;
     if (!data.pairs || data.pairs.length === 0) return [];
 
-    console.log(`📊 取得ペア数: ${data.pairs.length}`);
-    const sample = data.pairs[0];
-    console.log(`📊 サンプル: ${sample?.baseToken?.symbol} 5m変化: ${sample?.priceChange?.m5}`);
+    console.log(`取得ペア数: ${data.pairs.length}`);
 
     const trendingPairs = data.pairs.filter((pair) => {
       if (!TREND_CONFIG.CHAINS.includes(pair.chainId)) return false;
+      if (pair.baseToken?.address === SOL_ADDRESS) return false;
+      if (pair.quoteToken?.address === SOL_ADDRESS && pair.baseToken?.address === SOL_ADDRESS) return false;
       const liquidity = parseFloat(pair.liquidity?.usd || 0);
       if (liquidity < TREND_CONFIG.MIN_LIQUIDITY_USD) return false;
-      const volume24h = parseFloat(pair.volume?.h24 || 0);
-      if (volume24h < TREND_CONFIG.MIN_VOLUME_24H) return false;
       const priceChange5m = parseFloat(pair.priceChange?.m5 || 0);
       if (priceChange5m < TREND_CONFIG.MIN_PRICE_CHANGE_5M) return false;
       if (purchasedTokens.has(pair.baseToken?.address)) return false;
       if (!pair.priceUsd || parseFloat(pair.priceUsd) <= 0) return false;
+      if (!pair.baseToken?.address) return false;
       return true;
     });
 
     trendingPairs.sort((a, b) => {
-      const aChange = parseFloat(a.priceChange?.m5 || 0);
-      const bChange = parseFloat(b.priceChange?.m5 || 0);
-      return bChange - aChange;
+      return parseFloat(b.priceChange?.m5 || 0) - parseFloat(a.priceChange?.m5 || 0);
     });
 
+    console.log(`対象コイン: ${trendingPairs.length}件`);
     return trendingPairs;
   } catch (error) {
-    console.error("❌ トレンドデータ取得エラー:", error.message);
+    console.error("トレンドデータ取得エラー:", error.message);
     return [];
   }
 }
@@ -80,7 +80,7 @@ async function sendTrendBuyNotification(pair, tradeResult) {
         { name: "🔗 DexScreener", value: `[チャートを見る](${dexLink})`, inline: false },
         tradeResult
           ? { name: "🔗 購入TX", value: `[確認する](https://solscan.io/tx/${tradeResult.txid})`, inline: false }
-          : { name: "購入", value: "失敗", inline: false },
+          : { name: "購入結果", value: "失敗", inline: false },
       ],
       footer: { text: `Solana Trend Bot | ${jstTime} JST` },
     }],
@@ -92,7 +92,7 @@ async function sendTrendBuyNotification(pair, tradeResult) {
       timeout: 10000,
     });
   } catch (error) {
-    console.error("❌ 通知エラー:", error.message);
+    console.error("通知エラー:", error.message);
   }
 }
 
@@ -100,38 +100,32 @@ async function checkTrends(solPriceUsd) {
   console.log("📈 トレンドチェック中...");
 
   if (positions.length >= TREND_CONFIG.MAX_POSITIONS) {
-    console.log(`最大ポジション数に達しています`);
+    console.log("最大ポジション数に達しています");
     return;
   }
 
   const trendingTokens = await getTrendingTokens();
 
   if (trendingTokens.length === 0) {
-    console.log("📊 上昇トレンドのコインなし");
+    console.log("上昇トレンドのコインなし");
     return;
   }
 
-  console.log(`📈 対象コイン: ${trendingTokens.length}件`);
+  const target = trendingTokens[0];
+  const symbol = target.baseToken?.symbol || "不明";
+  console.log(`購入試行: ${symbol}`);
 
-  const targets = trendingTokens.slice(0, 1);
+  const tradeResult = await buyToken(target.baseToken.address, solPriceUsd);
 
-  for (const pair of targets) {
-    const symbol = pair.baseToken?.symbol || "不明";
-    console.log(`購入試行: ${symbol}`);
-
-    const tradeResult = await buyToken(pair.baseToken.address, solPriceUsd);
-
-    if (tradeResult) {
-      addPosition(tradeResult);
-      purchasedTokens.add(pair.baseToken.address);
-      console.log(`✅ 購入成功: ${symbol}`);
-    } else {
-      console.log(`❌ 購入失敗: ${symbol}`);
-    }
-
-    await sendTrendBuyNotification(pair, tradeResult);
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+  if (tradeResult) {
+    addPosition(tradeResult);
+    purchasedTokens.add(target.baseToken.address);
+    console.log(`✅ 購入成功: ${symbol}`);
+  } else {
+    console.log(`❌ 購入失敗: ${symbol}`);
   }
+
+  await sendTrendBuyNotification(target, tradeResult);
 }
 
 module.exports = { checkTrends };
