@@ -3,6 +3,7 @@ const { buyToken } = require("./trader");
 const { addPosition, positions } = require("./portfolio");
 
 const SOL_ADDRESS = "So11111111111111111111111111111111111111112";
+const WSOL_ADDRESS = "So11111111111111111111111111111111111111112";
 
 const TREND_CONFIG = {
   MIN_PRICE_CHANGE_5M: -100,
@@ -28,7 +29,9 @@ async function getTrendingTokens() {
     const trendingPairs = data.pairs.filter((pair) => {
       if (!TREND_CONFIG.CHAINS.includes(pair.chainId)) return false;
       if (pair.baseToken?.address === SOL_ADDRESS) return false;
-      if (pair.quoteToken?.address === SOL_ADDRESS && pair.baseToken?.address === SOL_ADDRESS) return false;
+      if (pair.baseToken?.address === WSOL_ADDRESS) return false;
+      if (pair.baseToken?.symbol === "SOL") return false;
+      if (pair.baseToken?.symbol === "WSOL") return false;
       const liquidity = parseFloat(pair.liquidity?.usd || 0);
       if (liquidity < TREND_CONFIG.MIN_LIQUIDITY_USD) return false;
       const priceChange5m = parseFloat(pair.priceChange?.m5 || 0);
@@ -44,6 +47,9 @@ async function getTrendingTokens() {
     });
 
     console.log(`対象コイン: ${trendingPairs.length}件`);
+    if (trendingPairs.length > 0) {
+      console.log(`1位: ${trendingPairs[0].baseToken?.symbol} (${trendingPairs[0].baseToken?.address})`);
+    }
     return trendingPairs;
   } catch (error) {
     console.error("トレンドデータ取得エラー:", error.message);
@@ -113,7 +119,7 @@ async function checkTrends(solPriceUsd) {
 
   const target = trendingTokens[0];
   const symbol = target.baseToken?.symbol || "不明";
-  console.log(`購入試行: ${symbol}`);
+  console.log(`購入試行: ${symbol} (${target.baseToken?.address})`);
 
   const tradeResult = await buyToken(target.baseToken.address, solPriceUsd);
 
