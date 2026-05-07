@@ -1,18 +1,9 @@
-// ============================================================
-// portfolio.js - ポジション管理モジュール
-// 役割: 保有中のトークンを監視して利確・損切りを判断する
-// ============================================================
-
 const axios = require("axios");
 const { sellToken, TRADE_CONFIG } = require("./trader");
 
-// 保有中のポジションを管理する配列
-// 例: [{ tokenMint, buyPrice, tokenAmount, buyAmountUsd, timestamp }, ...]
+// 起動時にポジションをリセット
 const positions = [];
 
-// ============================================================
-// 📊 現在価格を取得する
-// ============================================================
 async function getCurrentPrice(tokenMint) {
   try {
     const response = await axios.get(
@@ -21,23 +12,18 @@ async function getCurrentPrice(tokenMint) {
     );
     const data = response.data;
     if (!data.pairs || data.pairs.length === 0) return null;
-
     const bestPair = data.pairs.reduce((best, current) => {
       const bestLiq = parseFloat(best.liquidity?.usd || 0);
       const currLiq = parseFloat(current.liquidity?.usd || 0);
       return currLiq > bestLiq ? current : best;
     });
-
     return parseFloat(bestPair.priceUsd);
   } catch (error) {
-    console.error("❌ 価格取得エラー:", error.message);
+    console.error("価格取得エラー:", error.message);
     return null;
   }
 }
 
-// ============================================================
-// ➕ ポジションを追加する
-// ============================================================
 function addPosition(tradeResult) {
   positions.push({
     tokenMint: tradeResult.tokenMint,
@@ -51,9 +37,6 @@ function addPosition(tradeResult) {
   console.log(`   保有中ポジション数: ${positions.length}`);
 }
 
-// ============================================================
-// ➖ ポジションを削除する
-// ============================================================
 function removePosition(tokenMint) {
   const index = positions.findIndex((p) => p.tokenMint === tokenMint);
   if (index !== -1) {
@@ -62,9 +45,6 @@ function removePosition(tokenMint) {
   }
 }
 
-// ============================================================
-// 📢 売却結果をDiscordに通知する
-// ============================================================
 async function sendSellNotification(position, sellResult, profitPercent) {
   const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
   if (!webhookUrl) return;
@@ -100,13 +80,10 @@ async function sendSellNotification(position, sellResult, profitPercent) {
       timeout: 10000,
     });
   } catch (error) {
-    console.error("❌ 売却通知エラー:", error.message);
+    console.error("売却通知エラー:", error.message);
   }
 }
 
-// ============================================================
-// 🔄 全ポジションを監視して利確・損切りを判断する
-// ============================================================
 async function monitorPositions() {
   if (positions.length === 0) {
     console.log("📊 保有ポジションなし");
@@ -118,33 +95,36 @@ async function monitorPositions() {
   for (const position of [...positions]) {
     const currentPrice = await getCurrentPrice(position.tokenMint);
     if (!currentPrice) {
-      console.log(`⚠️ ${position.tokenMint} の価格取得失敗`);
+      console.log(`⚠️ 価格取得失敗 → ポジション削除`);
+      removePosition(position.tokenMint);
       continue;
     }
 
-    // 損益率を計算
     const profitPercent = ((currentPrice - position.buyPrice) / position.buyPrice) * 100;
-    console.log(`  📈 ${position.tokenMint}: ${profitPercent.toFixed(2)}%`);
+    console.log(`  📈 ${position.tokenMint.substring(0, 8)}...: ${profitPercent.toFixed(2)}%`);
 
-    // 利確判定
     if (profitPercent >= TRADE_CONFIG.TAKE_PROFIT_PERCENT) {
       console.log(`🎯 利確条件達成！${profitPercent.toFixed(2)}%`);
       const sellResult = await sellToken(position, currentPrice, "利確");
       if (sellResult) {
         await sendSellNotification(position, sellResult, profitPercent);
         removePosition(position.tokenMint);
+      } else {
+        console.log("売り失敗 → 流動性不足のためポジション削除");
+        removePosition(position.tokenMint);
       }
       continue;
     }
 
-    // 損切り判定
     if (profitPercent <= TRADE_CONFIG.STOP_LOSS_PERCENT) {
       console.log(`🔴 損切り条件達成！${profitPercent.toFixed(2)}%`);
       const sellResult = await sellToken(position, currentPrice, "損切り");
       if (sellResult) {
         await sendSellNotification(position, sellResult, profitPercent);
-        removePosition(position.tokenMint);
+      } else {
+        console.log("売り失敗 → 流動性不足のためポジション削除");
       }
+      removePosition(position.tokenMint);
     }
   }
 }
