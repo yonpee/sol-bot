@@ -5,9 +5,6 @@ const { addPosition, positions } = require("./portfolio");
 
 const PUMPFUN_CONFIG = {
   MAX_POSITIONS: 3,
-  MIN_SOL_LIQUIDITY: 5,
-  TAKE_PROFIT_PERCENT: 30,
-  STOP_LOSS_PERCENT: -20,
 };
 
 let ws = null;
@@ -28,14 +25,13 @@ async function sendNotification(token, tradeResult) {
     content: "🆕 **PumpFun新規上場！自動購入！** @everyone",
     embeds: [{
       title: `🚀 ${token.name} ($${token.symbol})`,
-      description: token.description?.substring(0, 100) || "新規上場コイン",
       color: 0x00ffff,
       fields: [
         { name: "📝 名前", value: token.name || "不明", inline: true },
         { name: "💎 シンボル", value: `$${token.symbol || "?"}`, inline: true },
         { name: "💵 購入金額", value: tradeResult ? "$5" : "失敗", inline: true },
-        { name: "🎯 利確", value: `+${PUMPFUN_CONFIG.TAKE_PROFIT_PERCENT}%`, inline: true },
-        { name: "🔴 損切り", value: `${PUMPFUN_CONFIG.STOP_LOSS_PERCENT}%`, inline: true },
+        { name: "🎯 利確", value: "+30%", inline: true },
+        { name: "🔴 損切り", value: "-20%", inline: true },
         { name: "🔗 PumpFun", value: `[見る](https://pump.fun/${token.mint})`, inline: false },
         tradeResult
           ? { name: "🔗 購入TX", value: `[確認する](https://solscan.io/tx/${tradeResult.txid})`, inline: false }
@@ -63,18 +59,17 @@ async function handleNewToken(token) {
     return;
   }
 
-  if (purchasedTokens.has(token.mint)) {
-    console.log("購入済みのトークンです");
-    return;
-  }
-
-  if (!token.mint) {
-    console.log("ミントアドレスなし → スキップ");
+  if (purchasedTokens.has(token.mint)) return;
+  if (!token.mint) return;
+  if (!solPriceUsd || solPriceUsd === 0) {
+    console.log("SOL価格未取得 → スキップ");
     return;
   }
 
   console.log(`購入試行: ${token.mint}`);
-  const tradeResult = await buyToken(token.mint, solPriceUsd);
+
+  // isPumpFun=true でPumpFun APIを使う
+  const tradeResult = await buyToken(token.mint, solPriceUsd, true);
 
   if (tradeResult) {
     addPosition(tradeResult);
@@ -94,20 +89,13 @@ function connectPumpFun() {
 
   ws.on("open", () => {
     console.log("✅ PumpFun WebSocket接続成功！");
-
-    // 新規トークンの監視を開始
-    ws.send(JSON.stringify({
-      method: "subscribeNewToken",
-    }));
-
+    ws.send(JSON.stringify({ method: "subscribeNewToken" }));
     console.log("👀 新規上場コインの監視開始！");
   });
 
   ws.on("message", async (data) => {
     try {
       const message = JSON.parse(data.toString());
-
-      // 新規トークンイベント
       if (message.txType === "create") {
         await handleNewToken({
           mint: message.mint,
