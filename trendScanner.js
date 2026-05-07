@@ -73,4 +73,65 @@ async function sendTrendBuyNotification(pair, tradeResult) {
       fields: [
         { name: "💰 購入価格", value: `$${parseFloat(pair.priceUsd).toFixed(8)}`, inline: true },
         { name: "📈 5分変化", value: `${priceChange5m.toFixed(2)}%`, inline: true },
-        { name: "💧 流動性", value: `$
+        { name: "💧 流動性", value: `$${liquidity.toLocaleString()}`, inline: true },
+        { name: "💵 購入金額", value: tradeResult ? "$5" : "失敗", inline: true },
+        { name: "🎯 利確", value: "+50%", inline: true },
+        { name: "🔴 損切り", value: "-30%", inline: true },
+        { name: "🔗 DexScreener", value: `[チャートを見る](${dexLink})`, inline: false },
+        tradeResult
+          ? { name: "🔗 購入TX", value: `[確認する](https://solscan.io/tx/${tradeResult.txid})`, inline: false }
+          : { name: "購入", value: "失敗", inline: false },
+      ],
+      footer: { text: `Solana Trend Bot | ${jstTime} JST` },
+    }],
+  };
+
+  try {
+    await axios.post(webhookUrl, payload, {
+      headers: { "Content-Type": "application/json" },
+      timeout: 10000,
+    });
+  } catch (error) {
+    console.error("❌ 通知エラー:", error.message);
+  }
+}
+
+async function checkTrends(solPriceUsd) {
+  console.log("📈 トレンドチェック中...");
+
+  if (positions.length >= TREND_CONFIG.MAX_POSITIONS) {
+    console.log(`最大ポジション数に達しています`);
+    return;
+  }
+
+  const trendingTokens = await getTrendingTokens();
+
+  if (trendingTokens.length === 0) {
+    console.log("📊 上昇トレンドのコインなし");
+    return;
+  }
+
+  console.log(`📈 対象コイン: ${trendingTokens.length}件`);
+
+  const targets = trendingTokens.slice(0, 1);
+
+  for (const pair of targets) {
+    const symbol = pair.baseToken?.symbol || "不明";
+    console.log(`購入試行: ${symbol}`);
+
+    const tradeResult = await buyToken(pair.baseToken.address, solPriceUsd);
+
+    if (tradeResult) {
+      addPosition(tradeResult);
+      purchasedTokens.add(pair.baseToken.address);
+      console.log(`✅ 購入成功: ${symbol}`);
+    } else {
+      console.log(`❌ 購入失敗: ${symbol}`);
+    }
+
+    await sendTrendBuyNotification(pair, tradeResult);
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+}
+
+module.exports = { checkTrends };
