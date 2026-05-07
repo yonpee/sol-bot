@@ -4,9 +4,10 @@ const { getSolanaPrice } = require("./priceChecker");
 const { sendDiscordNotification, sendStartupNotification } = require("./notifier");
 const { checkTrends } = require("./trendScanner");
 const { monitorPositions } = require("./portfolio");
+const { connectPumpFun, setSolPrice } = require("./pumpfun");
 
 const CONFIG = {
-  CHECK_INTERVAL_MINUTES: 1,
+  CHECK_INTERVAL_MINUTES: 3,
   PRICE_HISTORY_MINUTES: 5,
   DROP_THRESHOLD_PERCENT: 3.0,
 };
@@ -57,6 +58,9 @@ async function checkPrice() {
   const priceData = await getSolanaPrice();
   if (!priceData) { console.log("⚠️ 価格取得失敗"); return null; }
   console.log(`💰 SOL: $${priceData.price.toFixed(4)}`);
+
+  setSolPrice(priceData.price);
+
   updatePriceHistory(priceData);
   const dropInfo = detectPriceDrop(priceData.price);
   if (!dropInfo) { console.log("📊 比較データ収集中..."); return priceData; }
@@ -70,9 +74,12 @@ async function checkPrice() {
 }
 
 async function startBot() {
-  console.log("🚀 Solana Trend Bot 起動中...");
+  console.log("🚀 Solana Trade Bot 起動中...");
   checkEnvironmentVariables();
   await sendStartupNotification(CONFIG);
+
+  // PumpFun WebSocket接続開始
+  connectPumpFun();
 
   const priceData = await checkPrice();
   if (priceData) {
