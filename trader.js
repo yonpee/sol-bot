@@ -12,7 +12,7 @@ const bs58 = require("bs58");
 // ============================================================
 const TRADE_CONFIG = {
   // 1回の買い金額（ドル）
-  BUY_AMOUNT_USD: 10,
+  BUY_AMOUNT_USD: 5,
   // 利確ライン（%）
   TAKE_PROFIT_PERCENT: 30,
   // 損切りライン（%）
