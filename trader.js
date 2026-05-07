@@ -1,6 +1,7 @@
-const { Connection, Keypair, VersionedTransaction, PublicKey } = require("@solana/web3.js");
+const { Connection, Keypair, VersionedTransaction } = require("@solana/web3.js");
 const bs58 = require("bs58");
-const cross_fetch = require("cross-fetch");
+const https = require("https");
+const http = require("http");
 
 const TRADE_CONFIG = {
   BUY_AMOUNT_USD: 5,
@@ -31,6 +32,45 @@ async function usdToLamports(usdAmount, solPriceUsd) {
   return Math.floor(solAmount * 1_000_000_000);
 }
 
+function fetchWithIP(url, options = {}) {
+  return new Promise((resolve, reject) => {
+    const urlObj = new URL(url);
+    const isHttps = urlObj.protocol === "https:";
+    const client = isHttps ? https : http;
+
+    const reqOptions = {
+      hostname: urlObj.hostname,
+      path: urlObj.pathname + urlObj.search,
+      method: options.method || "GET",
+      headers: {
+        "Content-Type": "application/json",
+        "Host": urlObj.hostname,
+        ...options.headers,
+      },
+      lookup: (hostname, options, callback) => {
+        callback(null, "104.21.0.1", 4);
+      },
+    };
+
+    const req = client.request(reqOptions, (res) => {
+      let data = "";
+      res.on("data", (chunk) => { data += chunk; });
+      res.on("end", () => {
+        try {
+          resolve({ ok: res.statusCode >= 200 && res.statusCode < 300, json: () => JSON.parse(data), status: res.statusCode });
+        } catch (e) {
+          reject(e);
+        }
+      });
+    });
+
+    req.on("error", reject);
+
+    if (options.body) req.write(options.body);
+    req.end();
+  });
+}
+
 async function buyToken(tokenMint, solPriceUsd) {
   console.log(`買い注文開始: ${tokenMint}`);
   try {
@@ -41,17 +81,27 @@ async function buyToken(tokenMint, solPriceUsd) {
 
     const quoteUrl = `https://quote-api.jup.ag/v6/quote?inputMint=${TRADE_CONFIG.SOL_MINT}&outputMint=${tokenMint}&amount=${lamports}&slippageBps=${TRADE_CONFIG.SLIPPAGE_BPS}`;
 
-    const quoteRes = await cross_fetch.fetch(quoteUrl, {
-      method: "GET",
+    const axios = require("axios");
+    const quoteRes = await axios.get(quoteUrl, {
+      timeout: 15000,
       headers: { "Content-Type": "application/json" },
+      httpsAgent: new (require("https").Agent)({
+        lookup: (hostname, options, callback) => {
+          console.log(`DNS解決試行: ${hostname}`);
+          require("dns").resolve4(hostname, (err, addresses) => {
+            if (err) {
+              console.error(`DNS解決失敗: ${err.message}`);
+              callback(err);
+            } else {
+              console.log(`DNS解決成功: ${addresses[0]}`);
+              callback(null, addresses[0], 4);
+            }
+          });
+        },
+      }),
     });
 
-    if (!quoteRes.ok) {
-      console.error("クォート取得失敗:", quoteRes.status);
-      return null;
-    }
-
-    const quote = await quoteRes.json();
+    const quote = quoteRes.data;
     if (!quote || quote.error) {
       console.error("クォートエラー:", quote?.error);
       return null;
@@ -59,26 +109,25 @@ async function buyToken(tokenMint, solPriceUsd) {
 
     console.log(`取得予定数量: ${quote.outAmount}`);
 
-    const swapRes = await cross_fetch.fetch("https://quote-api.jup.ag/v6/swap", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        quoteResponse: quote,
-        userPublicKey: wallet.publicKey.toString(),
-        wrapAndUnwrapSol: true,
-        dynamicComputeUnitLimit: true,
-        prioritizationFeeLamports: 1000,
+    const swapRes = await axios.post("https://quote-api.jup.ag/v6/swap", {
+      quoteResponse: quote,
+      userPublicKey: wallet.publicKey.toString(),
+      wrapAndUnwrapSol: true,
+      dynamicComputeUnitLimit: true,
+      prioritizationFeeLamports: 1000,
+    }, {
+      timeout: 15000,
+      httpsAgent: new (require("https").Agent)({
+        lookup: (hostname, options, callback) => {
+          require("dns").resolve4(hostname, (err, addresses) => {
+            if (err) callback(err);
+            else callback(null, addresses[0], 4);
+          });
+        },
       }),
     });
 
-    if (!swapRes.ok) {
-      console.error("スワップ取得失敗:", swapRes.status);
-      return null;
-    }
-
-    const swapData = await swapRes.json();
-    const { swapTransaction } = swapData;
-
+    const { swapTransaction } = swapRes.data;
     const swapTransactionBuf = Buffer.from(swapTransaction, "base64");
     const transaction = VersionedTransaction.deserialize(swapTransactionBuf);
     transaction.sign([wallet]);
@@ -106,47 +155,28 @@ async function buyToken(tokenMint, solPriceUsd) {
 async function sellToken(position, currentPrice, reason) {
   console.log(`売り注文開始: ${position.tokenMint} (${reason})`);
   try {
+    const axios = require("axios");
     const wallet = getWallet();
     const connection = getConnection();
 
     const quoteUrl = `https://quote-api.jup.ag/v6/quote?inputMint=${position.tokenMint}&outputMint=${TRADE_CONFIG.SOL_MINT}&amount=${Math.floor(position.tokenAmount)}&slippageBps=${TRADE_CONFIG.SLIPPAGE_BPS}`;
 
-    const quoteRes = await cross_fetch.fetch(quoteUrl, {
-      method: "GET",
-      headers: { "Content-Type": "application/json" },
-    });
-
-    if (!quoteRes.ok) {
-      console.error("売りクォート取得失敗:", quoteRes.status);
-      return null;
-    }
-
-    const quote = await quoteRes.json();
+    const quoteRes = await axios.get(quoteUrl, { timeout: 15000 });
+    const quote = quoteRes.data;
     if (!quote || quote.error) {
       console.error("売りクォートエラー:", quote?.error);
       return null;
     }
 
-    const swapRes = await cross_fetch.fetch("https://quote-api.jup.ag/v6/swap", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        quoteResponse: quote,
-        userPublicKey: wallet.publicKey.toString(),
-        wrapAndUnwrapSol: true,
-        dynamicComputeUnitLimit: true,
-        prioritizationFeeLamports: 1000,
-      }),
-    });
+    const swapRes = await axios.post("https://quote-api.jup.ag/v6/swap", {
+      quoteResponse: quote,
+      userPublicKey: wallet.publicKey.toString(),
+      wrapAndUnwrapSol: true,
+      dynamicComputeUnitLimit: true,
+      prioritizationFeeLamports: 1000,
+    }, { timeout: 15000 });
 
-    if (!swapRes.ok) {
-      console.error("売りスワップ取得失敗:", swapRes.status);
-      return null;
-    }
-
-    const swapData = await swapRes.json();
-    const { swapTransaction } = swapData;
-
+    const { swapTransaction } = swapRes.data;
     const swapTransactionBuf = Buffer.from(swapTransaction, "base64");
     const transaction = VersionedTransaction.deserialize(swapTransactionBuf);
     transaction.sign([wallet]);
