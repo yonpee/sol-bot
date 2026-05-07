@@ -14,9 +14,9 @@ const TRADE_CONFIG = {
   // 1回の買い金額（ドル）
   BUY_AMOUNT_USD: 5,
   // 利確ライン（%）
-  TAKE_PROFIT_PERCENT: 30,
+  TAKE_PROFIT_PERCENT: 50,
   // 損切りライン（%）
-  STOP_LOSS_PERCENT: -20,
+  STOP_LOSS_PERCENT: -30,
   // スリッページ（%）- 価格のズレを許容する範囲
   SLIPPAGE_BPS: 300, // 3%
   // SOLのミントアドレス
