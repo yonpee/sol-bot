@@ -10,6 +10,7 @@ const PUMPFUN_CONFIG = {
 let ws = null;
 let solPriceUsd = 0;
 const purchasedTokens = new Set();
+let isProcessing = false;
 
 async function sendNotification(token, tradeResult) {
   const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
@@ -22,20 +23,17 @@ async function sendNotification(token, tradeResult) {
   }).format(new Date());
 
   const payload = {
-    content: "🆕 **PumpFun新規上場！自動購入！** @everyone",
+    content: "🆕 **PumpFun新規上場！** @everyone",
     embeds: [{
       title: `🚀 ${token.name} ($${token.symbol})`,
       color: 0x00ffff,
       fields: [
-        { name: "📝 名前", value: token.name || "不明", inline: true },
         { name: "💎 シンボル", value: `$${token.symbol || "?"}`, inline: true },
-        { name: "💵 購入金額", value: tradeResult ? "$5" : "失敗", inline: true },
-        { name: "🎯 利確", value: "+30%", inline: true },
-        { name: "🔴 損切り", value: "-20%", inline: true },
+        { name: "💵 購入", value: tradeResult ? "成功 $5" : "失敗", inline: true },
         { name: "🔗 PumpFun", value: `[見る](https://pump.fun/${token.mint})`, inline: false },
         tradeResult
-          ? { name: "🔗 購入TX", value: `[確認する](https://solscan.io/tx/${tradeResult.txid})`, inline: false }
-          : { name: "購入結果", value: "失敗", inline: false },
+          ? { name: "🔗 TX", value: `[確認](https://solscan.io/tx/${tradeResult.txid})`, inline: false }
+          : { name: "結果", value: "失敗", inline: false },
       ],
       footer: { text: `PumpFun Bot | ${jstTime} JST` },
     }],
@@ -52,43 +50,40 @@ async function sendNotification(token, tradeResult) {
 }
 
 async function handleNewToken(token) {
-  console.log(`🆕 新規上場検知: ${token.name} ($${token.symbol})`);
-
-  if (positions.length >= PUMPFUN_CONFIG.MAX_POSITIONS) {
-    console.log("ポジション保有中 → スキップ");
-    return;
-  }
-
+  if (isProcessing) return;
+  if (positions.length >= PUMPFUN_CONFIG.MAX_POSITIONS) return;
   if (purchasedTokens.has(token.mint)) return;
   if (!token.mint) return;
-  if (!solPriceUsd || solPriceUsd === 0) {
-    console.log("SOL価格未取得 → スキップ");
-    return;
+  if (!solPriceUsd || solPriceUsd === 0) return;
+
+  isProcessing = true;
+  console.log(`🆕 ${token.name} ($${token.symbol})`);
+
+  try {
+    const tradeResult = await buyToken(token.mint, solPriceUsd, true);
+
+    if (tradeResult) {
+      addPosition(tradeResult);
+      purchasedTokens.add(token.mint);
+      console.log(`✅ 購入成功: ${token.symbol}`);
+    } else {
+      console.log(`❌ 購入失敗: ${token.symbol}`);
+    }
+
+    await sendNotification(token, tradeResult);
+  } finally {
+    isProcessing = false;
   }
-
-  console.log(`購入試行: ${token.mint}`);
-  const tradeResult = await buyToken(token.mint, solPriceUsd, true);
-
-  if (tradeResult) {
-    addPosition(tradeResult);
-    purchasedTokens.add(token.mint);
-    console.log(`✅ 購入成功: ${token.symbol}`);
-  } else {
-    console.log(`❌ 購入失敗: ${token.symbol}`);
-  }
-
-  await sendNotification(token, tradeResult);
 }
 
 function connectPumpFun() {
-  console.log("🔌 PumpFun WebSocketに接続中...");
+  console.log("🔌 PumpFun接続中...");
 
   ws = new WebSocket("wss://pumpportal.fun/api/data");
 
   ws.on("open", () => {
-    console.log("✅ PumpFun WebSocket接続成功！");
+    console.log("✅ PumpFun接続成功！");
     ws.send(JSON.stringify({ method: "subscribeNewToken" }));
-    console.log("👀 新規上場コインの監視開始！");
   });
 
   ws.on("message", async (data) => {
@@ -99,21 +94,18 @@ function connectPumpFun() {
           mint: message.mint,
           name: message.name,
           symbol: message.symbol,
-          description: message.description,
         });
       }
     } catch (error) {
-      console.error("メッセージ処理エラー:", error.message);
+      // エラーを無視して続行
     }
   });
 
-  ws.on("error", (error) => {
-    console.error("❌ WebSocketエラー:", error.message);
-  });
+  ws.on("error", () => {});
 
   ws.on("close", () => {
-    console.log("🔌 WebSocket切断 → 5秒後に再接続...");
-    setTimeout(connectPumpFun, 5000);
+    console.log("再接続中...");
+    setTimeout(connectPumpFun, 10000);
   });
 }
 
