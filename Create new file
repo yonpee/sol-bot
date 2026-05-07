@@ -1,1 +1,196 @@
+// ============================================================
+// newListing.js - 新規上場検知モジュール
+// 役割: DexScreenerで新しく上場したSOLコインを検知する
+// ============================================================
+
+const axios = require("axios");
+
+// ============================================================
+// 🔧 新規上場検知の設定
+// ============================================================
+const LISTING_CONFIG = {
+  // 何分以内に上場したコインを検知するか
+  NEW_LISTING_MINUTES: 1,
+  // 流動性の最低ライン（ドル）
+  MIN_LIQUIDITY_USD: 10000,
+  // チェーン
+  CHAIN: "solana",
+};
+
+// 通知済みのコインを記録（同じコインを何度も通知しない）
+const notifiedTokens = new Set();
+
+// ============================================================
+// 📡 DexScreenerから新規上場コインを取得する
+// ============================================================
+async function getNewListings() {
+  try {
+    // DexScreenerの新着トークンAPIを叩く
+    const response = await axios.get(
+      `https://api.dexscreener.com/latest/dex/search?q=solana`,
+      {
+        timeout: 10000,
+        headers: { "User-Agent": "SolanaBot/1.0" },
+      }
+    );
+
+    const data = response.data;
+    if (!data.pairs || data.pairs.length === 0) {
+      console.log("📊 新規上場データなし");
+      return [];
+    }
+
+    const now = Date.now();
+    const cutoffTime = LISTING_CONFIG.NEW_LISTING_MINUTES * 60 * 1000;
+
+    // 条件でフィルタリング
+    const newListings = data.pairs.filter((pair) => {
+      // Solanaチェーンのみ
+      if (pair.chainId !== LISTING_CONFIG.CHAIN) return false;
+
+      // 流動性チェック
+      const liquidity = parseFloat(pair.liquidity?.usd || 0);
+      if (liquidity < LISTING_CONFIG.MIN_LIQUIDITY_USD) return false;
+
+      // 上場時間チェック（pairCreatedAtで判定）
+      if (!pair.pairCreatedAt) return false;
+      const listedAgo = now - pair.pairCreatedAt;
+      if (listedAgo > cutoffTime) return false;
+
+      // 通知済みチェック
+      if (notifiedTokens.has(pair.pairAddress)) return false;
+
+      return true;
+    });
+
+    return newListings;
+  } catch (error) {
+    console.error("❌ 新規上場データ取得エラー:", error.message);
+    return [];
+  }
+}
+
+// ============================================================
+// 🔔 新規上場をDiscordに通知する
+// ============================================================
+async function sendNewListingNotification(pair) {
+  const axios = require("axios");
+  const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
+  if (!webhookUrl) return;
+
+  const now = new Date();
+  const jstTime = new Intl.DateTimeFormat("ja-JP", {
+    timeZone: "Asia/Tokyo",
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit",
+  }).format(now);
+
+  // 上場からの経過時間
+  const listedAgoSec = Math.round((Date.now() - pair.pairCreatedAt) / 1000);
+  const listedAgoText = listedAgoSec < 60
+    ? `${listedAgoSec}秒前`
+    : `${Math.round(listedAgoSec / 60)}分前`;
+
+  const price = parseFloat(pair.priceUsd || 0);
+  const liquidity = parseFloat(pair.liquidity?.usd || 0);
+  const volume5m = parseFloat(pair.volume?.m5 || 0);
+  const priceChange5m = parseFloat(pair.priceChange?.m5 || 0);
+  const dexLink = `https://dexscreener.com/${pair.chainId}/${pair.pairAddress}`;
+
+  const payload = {
+    content: "🆕 **新規上場検知！** @everyone",
+    embeds: [
+      {
+        title: `🚀 ${pair.baseToken?.name || "不明"} ($${pair.baseToken?.symbol || "?"})`,
+        description: "新しいトークンが上場しました！",
+        color: 0x00ffff, // 水色
+
+        fields: [
+          {
+            name: "💰 現在価格",
+            value: `$${price.toFixed(8)}`,
+            inline: true,
+          },
+          {
+            name: "⏱️ 上場時間",
+            value: listedAgoText,
+            inline: true,
+          },
+          {
+            name: "💧 流動性",
+            value: `$${liquidity.toLocaleString()}`,
+            inline: true,
+          },
+          {
+            name: "📊 5分出来高",
+            value: `$${volume5m.toLocaleString()}`,
+            inline: true,
+          },
+          {
+            name: "📈 5分価格変化",
+            value: `${priceChange5m.toFixed(2)}%`,
+            inline: true,
+          },
+          {
+            name: "🏦 DEX",
+            value: pair.dexId || "不明",
+            inline: true,
+          },
+          {
+            name: "🔗 DexScreenerで確認",
+            value: `[チャートを見る](${dexLink})`,
+            inline: false,
+          },
+        ],
+
+        footer: { text: `Solana New Listing Bot | ${jstTime} JST` },
+      },
+    ],
+  };
+
+  try {
+    await axios.post(webhookUrl, payload, {
+      headers: { "Content-Type": "application/json" },
+      timeout: 10000,
+    });
+    console.log(`✅ 新規上場通知送信: ${pair.baseToken?.symbol}`);
+
+    // 通知済みとして記録
+    notifiedTokens.add(pair.pairAddress);
+
+    // メモリ節約のため古い記録を削除（1000件超えたら削除）
+    if (notifiedTokens.size > 1000) {
+      const firstItem = notifiedTokens.values().next().value;
+      notifiedTokens.delete(firstItem);
+    }
+  } catch (error) {
+    console.error("❌ 新規上場通知エラー:", error.message);
+  }
+}
+
+// ============================================================
+// 🔄 新規上場チェックのメイン処理
+// ============================================================
+async function checkNewListings() {
+  console.log("🔍 新規上場チェック中...");
+
+  const newListings = await getNewListings();
+
+  if (newListings.length === 0) {
+    console.log("📊 新規上場なし");
+    return;
+  }
+
+  console.log(`🆕 新規上場検知: ${newListings.length}件`);
+
+  // 検知したコインを全部通知
+  for (const pair of newListings) {
+    console.log(`  → ${pair.baseToken?.symbol}: $${pair.priceUsd}`);
+    await sendNewListingNotification(pair);
+    // 連続通知を少し遅らせる（Discord Rate Limit対策）
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+}
+
+module.exports = { checkNewListings };
 
