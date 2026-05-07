@@ -8,8 +8,8 @@ const TRADE_CONFIG = {
   STOP_LOSS_PERCENT: -30,
   SLIPPAGE_BPS: 300,
   SOL_MINT: "So11111111111111111111111111111111111111112",
-  JUPITER_QUOTE_API: "https://lite.jup.ag/v1/quote",
-  JUPITER_SWAP_API: "https://lite.jup.ag/v1/swap",
+  JUPITER_QUOTE_API: "https://quote-api.jup.ag/v6/quote",
+  JUPITER_SWAP_API: "https://quote-api.jup.ag/v6/swap",
 };
 
 function getWallet() {
@@ -48,7 +48,7 @@ async function buyToken(tokenMint, solPriceUsd) {
         amount: lamports,
         slippageBps: TRADE_CONFIG.SLIPPAGE_BPS,
       },
-      timeout: 10000,
+      timeout: 15000,
     });
 
     const quote = quoteResponse.data;
@@ -65,7 +65,7 @@ async function buyToken(tokenMint, solPriceUsd) {
       wrapAndUnwrapSol: true,
       dynamicComputeUnitLimit: true,
       prioritizationFeeLamports: 1000,
-    }, { timeout: 10000 });
+    }, { timeout: 15000 });
 
     const { swapTransaction } = swapResponse.data;
     const swapTransactionBuf = Buffer.from(swapTransaction, "base64");
@@ -105,7 +105,7 @@ async function sellToken(position, currentPrice, reason) {
         amount: Math.floor(position.tokenAmount),
         slippageBps: TRADE_CONFIG.SLIPPAGE_BPS,
       },
-      timeout: 10000,
+      timeout: 15000,
     });
 
     const quote = quoteResponse.data;
@@ -120,7 +120,7 @@ async function sellToken(position, currentPrice, reason) {
       wrapAndUnwrapSol: true,
       dynamicComputeUnitLimit: true,
       prioritizationFeeLamports: 1000,
-    }, { timeout: 10000 });
+    }, { timeout: 15000 });
 
     const { swapTransaction } = swapResponse.data;
     const swapTransactionBuf = Buffer.from(swapTransaction, "base64");
