@@ -1,6 +1,6 @@
 {
   "name": "solana-trade-bot",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "description": "SOL自動売買Bot",
   "main": "index.js",
   "scripts": {
@@ -15,6 +15,6 @@
     "node-cron": "^3.0.3",
     "@solana/web3.js": "^1.87.6",
     "bs58": "^5.0.0",
-    "cross-fetch": "^4.0.0"
+    "ws": "^8.16.0"
   }
 }
