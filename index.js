@@ -3,6 +3,7 @@ const cron = require("node-cron");
 const { getSolanaPrice } = require("./priceChecker");
 const { sendDiscordNotification, sendStartupNotification } = require("./notifier");
 const { checkNewListings } = require("./newListing");
+const { monitorPositions } = require("./portfolio");
 
 const CONFIG = {
   CHECK_INTERVAL_MINUTES: 1,
@@ -15,20 +16,17 @@ module.exports = { CONFIG };
 
 function checkEnvironmentVariables() {
   console.log("🔍 環境変数をチェック中...");
-  const requiredVars = ["DISCORD_WEBHOOK_URL"];
+  const requiredVars = ["DISCORD_WEBHOOK_URL", "WALLET_PRIVATE_KEY"];
   let hasError = false;
   for (const varName of requiredVars) {
     if (!process.env[varName]) {
-      console.error(`❌ エラー: ${varName} が設定されていません！`);
+      console.error(`❌ ${varName} が未設定！`);
       hasError = true;
     } else {
       console.log(`✅ ${varName}: 設定済み`);
     }
   }
-  if (hasError) {
-    console.error("🛑 必須の環境変数が不足しています。");
-    process.exit(1);
-  }
+  if (hasError) { process.exit(1); }
   console.log("✅ 環境変数チェック完了！\n");
 }
 
@@ -55,41 +53,46 @@ function detectPriceDrop(currentPrice) {
 
 async function checkPrice() {
   const now = new Date().toLocaleTimeString("ja-JP", { timeZone: "Asia/Tokyo" });
-  console.log(`\n⏰ [${now}] 価格チェック開始...`);
+  console.log(`\n⏰ [${now}] チェック開始...`);
   const priceData = await getSolanaPrice();
-  if (!priceData) { console.log("⚠️ 価格取得失敗"); return; }
+  if (!priceData) { console.log("⚠️ 価格取得失敗"); return null; }
   console.log(`💰 SOL: $${priceData.price.toFixed(4)}`);
   updatePriceHistory(priceData);
   const dropInfo = detectPriceDrop(priceData.price);
-  if (!dropInfo) { console.log("📊 比較データ収集中..."); return; }
+  if (!dropInfo) { console.log("📊 比較データ収集中..."); return priceData; }
   console.log(`📉 ${dropInfo.minutesAgo}分前比較: ${dropInfo.changePercent.toFixed(2)}%`);
   if (dropInfo.changePercent <= -CONFIG.DROP_THRESHOLD_PERCENT) {
     await sendDiscordNotification(priceData, dropInfo);
   } else {
     console.log("✅ 異常なし");
   }
+  return priceData;
 }
 
 async function startBot() {
-  console.log("🚀 Solana Bot 起動中...");
+  console.log("🚀 Solana Trade Bot 起動中...");
   checkEnvironmentVariables();
   await sendStartupNotification(CONFIG);
 
-  // 最初のチェック
-  await checkPrice();
-  await checkNewListings();
+  const priceData = await checkPrice();
+  if (priceData) {
+    await checkNewListings(priceData.price);
+    await monitorPositions();
+  }
 
-  // 1分ごとに両方チェック
   cron.schedule(`*/${CONFIG.CHECK_INTERVAL_MINUTES} * * * *`, async () => {
-    await checkPrice();
-    await checkNewListings();
+    const pd = await checkPrice();
+    if (pd) {
+      await checkNewListings(pd.price);
+      await monitorPositions();
+    }
   });
 
   console.log("✅ Bot稼働中！");
 }
 
-process.on("uncaughtException", (error) => { console.error("🔥 エラー:", error.message); });
-process.on("unhandledRejection", (reason) => { console.error("🔥 Promiseエラー:", reason); });
+process.on("uncaughtException", (e) => { console.error("🔥 エラー:", e.message); });
+process.on("unhandledRejection", (r) => { console.error("🔥 Promiseエラー:", r); });
 process.on("SIGINT", () => { console.log("\n👋 Bot停止"); process.exit(0); });
 
-startBot().catch((error) => { console.error("🔥 起動エラー:", error); process.exit(1); });
+startBot().catch((e) => { console.error("🔥 起動エラー:", e); process.exit(1); });
