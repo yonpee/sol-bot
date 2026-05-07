@@ -2,6 +2,7 @@ require("dotenv").config();
 const cron = require("node-cron");
 const { getSolanaPrice } = require("./priceChecker");
 const { sendDiscordNotification, sendStartupNotification } = require("./notifier");
+const { checkNewListings } = require("./newListing");
 
 const CONFIG = {
   CHECK_INTERVAL_MINUTES: 1,
@@ -25,7 +26,7 @@ function checkEnvironmentVariables() {
     }
   }
   if (hasError) {
-    console.error("🛑 必須の環境変数が不足しています。Botを終了します。");
+    console.error("🛑 必須の環境変数が不足しています。");
     process.exit(1);
   }
   console.log("✅ 環境変数チェック完了！\n");
@@ -42,10 +43,7 @@ function updatePriceHistory(priceData) {
 function detectPriceDrop(currentPrice) {
   const compareTime = Date.now() - CONFIG.PRICE_HISTORY_MINUTES * 60 * 1000;
   const oldPrices = priceHistory.filter((p) => p.timestamp <= compareTime + 30000);
-  if (oldPrices.length === 0) {
-    console.log(`📊 比較データ不足`);
-    return null;
-  }
+  if (oldPrices.length === 0) return null;
   const oldestPrice = oldPrices[oldPrices.length - 1];
   const priceChange = ((currentPrice - oldestPrice.price) / oldestPrice.price) * 100;
   return {
@@ -59,36 +57,35 @@ async function checkPrice() {
   const now = new Date().toLocaleTimeString("ja-JP", { timeZone: "Asia/Tokyo" });
   console.log(`\n⏰ [${now}] 価格チェック開始...`);
   const priceData = await getSolanaPrice();
-  if (!priceData) {
-    console.log("⚠️ 価格取得失敗。次のチェックまで待機します。");
-    return;
-  }
-  console.log(`💰 SOL現在価格: $${priceData.price.toFixed(4)}`);
+  if (!priceData) { console.log("⚠️ 価格取得失敗"); return; }
+  console.log(`💰 SOL: $${priceData.price.toFixed(4)}`);
   updatePriceHistory(priceData);
-  console.log(`📝 価格履歴: ${priceHistory.length}件`);
   const dropInfo = detectPriceDrop(priceData.price);
-  if (!dropInfo) {
-    console.log("📊 比較データ収集中...");
-    return;
-  }
-  console.log(`📉 ${dropInfo.minutesAgo}分前との比較: ${dropInfo.changePercent.toFixed(2)}%`);
+  if (!dropInfo) { console.log("📊 比較データ収集中..."); return; }
+  console.log(`📉 ${dropInfo.minutesAgo}分前比較: ${dropInfo.changePercent.toFixed(2)}%`);
   if (dropInfo.changePercent <= -CONFIG.DROP_THRESHOLD_PERCENT) {
-    console.log(`🚨 下落検知！通知中...`);
     await sendDiscordNotification(priceData, dropInfo);
   } else {
-    console.log(`✅ 異常なし`);
+    console.log("✅ 異常なし");
   }
 }
 
 async function startBot() {
-  console.log("🚀 Solana Price Bot 起動中...");
+  console.log("🚀 Solana Bot 起動中...");
   checkEnvironmentVariables();
   await sendStartupNotification(CONFIG);
+
+  // 最初のチェック
   await checkPrice();
+  await checkNewListings();
+
+  // 1分ごとに両方チェック
   cron.schedule(`*/${CONFIG.CHECK_INTERVAL_MINUTES} * * * *`, async () => {
     await checkPrice();
+    await checkNewListings();
   });
-  console.log(`✅ Bot稼働中！`);
+
+  console.log("✅ Bot稼働中！");
 }
 
 process.on("uncaughtException", (error) => { console.error("🔥 エラー:", error.message); });
