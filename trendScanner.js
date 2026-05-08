@@ -15,7 +15,7 @@ const WATCH_TOKENS = [
 ];
 
 const CONFIG = {
-  MIN_PRICE_CHANGE_5M: 2,
+  MIN_PRICE_CHANGE_5M: 0.5,
   MAX_POSITIONS: 1,
 };
 
