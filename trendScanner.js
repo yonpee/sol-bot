@@ -135,4 +135,12 @@ async function checkTrends(solPriceUsd) {
       best.token.symbol,
       parseFloat(best.pair.priceUsd || 0),
       best.priceChange5m,
-      tr​​​​​​​​​​​​​​​​
+      tradeResult.txid,
+      dexLink
+    );
+  } else {
+    console.log(`購入失敗: ${best.token.symbol}`);
+  }
+}
+
+module.exports = { checkTrends };
