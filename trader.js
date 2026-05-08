@@ -24,8 +24,177 @@ const TRADE_CONFIG = {
 
 function getWallet() {
   const privateKey = process.env.WALLET_PRIVATE_KEY;
-  if (!privateKey) throw new Error("WALLET_PRIVATE_KEY が未設定！");
+  if (!privateKey) throw new Error("WALLET_PRIVATE_KEY未設定");
+  const secretKey = bs58.decode(privateKey);
+  return Keypair.fromSecretKey(secretKey);
+}
+
+function getConnection() {
+  const rpcUrl = process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
+  return new Connection(rpcUrl, "confirmed");
+}
+
+function usdcToAmount(usdcAmount) {
+  return Math.floor(usdcAmount * 1_000_000);
+}
+
+async function createTokenAccount(connection, wallet, mintAddress) {
+  const mint = new PublicKey(mintAddress);
+  const ata = await getAssociatedTokenAddress(
+    mint, wallet.publicKey, false,
+    TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID
+  );
+  const info = await connection.getAccountInfo(ata);
+  if (info) {
+    console.log("トークンアカウントOK");
+    return true;
+  }
+  console.log("トークンアカウント作成中...");
+  const ix = createAssociatedTokenAccountInstruction(
+    wallet.publicKey, ata, wallet.publicKey, mint,
+    TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID
+  );
+  const { blockhash, lastValidBlockHeight } =
+    await connection.getLatestBlockhash("finalized");
+  const tx = new Transaction({ recentBlockhash: blockhash, feePayer: wallet.publicKey });
+  tx.add(ix);
+  tx.sign(wallet);
+  const sig = await connection.sendRawTransaction(tx.serialize(), { skipPreflight: false });
+  await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight });
+  console.log("トークンアカウント作成完了!");
+  return true;
+}
+
+async function buyToken(tokenMint, solPriceUsd, isPumpFun = false) {
+  console.log("USDC購入開始:", tokenMint);
+  const wallet = getWallet();
+  const connection = getConnection();
+  const usdcAmount = usdcToAmount(TRADE_CONFIG.BUY_AMOUNT_USDC);
+  console.log(`買い金額: $${TRADE_CONFIG.BUY_AMOUNT_USDC} USDC`);
+
   try {
-    const secretKey = bs58.decode(privateKey);
-    return Keypair.fromSecretKey(secretKey);
-  }​​​​​​​​​​​​​​​​
+    await createTokenAccount(connection, wallet, tokenMint);
+  } catch (e) {
+    console.log("アカウント作成スキップ:", e.message);
+  }
+
+  try {
+    const quoteRes = await axios.get(TRADE_CONFIG.RAYDIUM_SWAP_API, {
+      params: {
+        inputMint: TRADE_CONFIG.USDC_MINT,
+        outputMint: tokenMint,
+        amount: usdcAmount,
+        slippageBps: TRADE_CONFIG.SLIPPAGE * 100,
+        txVersion: "V0",
+      },
+      timeout: 15000,
+    });
+
+    const quote = quoteRes.data;
+    if (!quote?.success) {
+      console.error("クォート失敗:", quote?.msg);
+      return null;
+    }
+
+    console.log("取得予定数量:", quote?.data?.outputAmount);
+
+    const txRes = await axios.post(TRADE_CONFIG.RAYDIUM_TX_API, {
+      computeUnitPriceMicroLamports: "100000",
+      swapResponse: quote,
+      txVersion: "V0",
+      wallet: wallet.publicKey.toString(),
+      wrapSol: false,
+      unwrapSol: false,
+    }, { timeout: 15000 });
+
+    if (!txRes.data?.success) {
+      console.error("トランザクション失敗:", txRes.data?.msg);
+      return null;
+    }
+
+    const transactions = txRes.data?.data;
+    if (!transactions || transactions.length === 0) return null;
+
+    let txid = null;
+    for (const txData of transactions) {
+      const buf = Buffer.from(txData.transaction, "base64");
+      const tx = VersionedTransaction.deserialize(buf);
+      tx.sign([wallet]);
+      txid = await connection.sendRawTransaction(tx.serialize(), {
+        skipPreflight: true, maxRetries: 3,
+      });
+      console.log("購入成功! TX:", txid);
+    }
+
+    return {
+      txid, tokenMint,
+      buyAmountUsd: TRADE_CONFIG.BUY_AMOUNT_USDC,
+      buyPrice: usdcAmount / parseFloat(quote?.data?.outputAmount || 1),
+      tokenAmount: parseFloat(quote?.data?.outputAmount || 0),
+      timestamp: Date.now(),
+      isPumpFun: false,
+    };
+  } catch (error) {
+    console.error("USDC購入エラー:", error.message);
+    return null;
+  }
+}
+
+async function sellToken(position, currentPrice, reason) {
+  console.log(`売り注文: ${position.tokenMint} (${reason})`);
+  try {
+    const wallet = getWallet();
+    const connection = getConnection();
+
+    const quoteRes = await axios.get(TRADE_CONFIG.RAYDIUM_SWAP_API, {
+      params: {
+        inputMint: position.tokenMint,
+        outputMint: TRADE_CONFIG.USDC_MINT,
+        amount: Math.floor(position.tokenAmount),
+        slippageBps: TRADE_CONFIG.SLIPPAGE * 100,
+        txVersion: "V0",
+      },
+      timeout: 15000,
+    });
+
+    const quote = quoteRes.data;
+    if (!quote?.success) {
+      console.error("売りクォート失敗:", quote?.msg);
+      return null;
+    }
+
+    const txRes = await axios.post(TRADE_CONFIG.RAYDIUM_TX_API, {
+      computeUnitPriceMicroLamports: "100000",
+      swapResponse: quote,
+      txVersion: "V0",
+      wallet: wallet.publicKey.toString(),
+      wrapSol: false,
+      unwrapSol: false,
+    }, { timeout: 15000 });
+
+    if (!txRes.data?.success) {
+      console.error("売りトランザクション失敗:", txRes.data?.msg);
+      return null;
+    }
+
+    const transactions = txRes.data?.data;
+    let txid = null;
+
+    for (const txData of transactions) {
+      const buf = Buffer.from(txData.transaction, "base64");
+      const tx = VersionedTransaction.deserialize(buf);
+      tx.sign([wallet]);
+      txid = await connection.sendRawTransaction(tx.serialize(), {
+        skipPreflight: true, maxRetries: 3,
+      });
+      console.log("売却成功! TX:", txid);
+    }
+
+    return { txid, reason, currentPrice };
+  } catch (error) {
+    console.error("売り注文エラー:", error.message);
+    return null;
+  }
+}
+
+module.exports = { buyToken, sellToken, TRADE_CONFIG };
