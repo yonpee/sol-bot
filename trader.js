@@ -1,8 +1,14 @@
 const axios = require("axios");
 const {
   Connection, Keypair, VersionedTransaction,
-  LAMPORTS_PER_SOL
+  PublicKey, Transaction, SystemProgram,
 } = require("@solana/web3.js");
+const {
+  getAssociatedTokenAddress,
+  createAssociatedTokenAccountInstruction,
+  TOKEN_PROGRAM_ID,
+  ASSOCIATED_TOKEN_PROGRAM_ID,
+} = require("@solana/spl-token");
 const bs58 = require("bs58");
 
 const TRADE_CONFIG = {
@@ -36,11 +42,67 @@ function usdcToAmount(usdcAmount) {
   return Math.floor(usdcAmount * 1_000_000);
 }
 
+async function createTokenAccountIfNeeded(connection, wallet, mintAddress) {
+  try {
+    const mint = new PublicKey(mintAddress);
+    const ata = await getAssociatedTokenAddress(
+      mint,
+      wallet.publicKey,
+      false,
+      TOKEN_PROGRAM_ID,
+      ASSOCIATED_TOKEN_PROGRAM_ID
+    );
+
+    const accountInfo = await connection.getAccountInfo(ata);
+    if (accountInfo) {
+      console.log(`トークンアカウント確認OK`);
+      return true;
+    }
+
+    console.log(`トークンアカウント作成中...`);
+    const ix = createAssociatedTokenAccountInstruction(
+      wallet.publicKey,
+      ata,
+      wallet.publicKey,
+      mint,
+      TOKEN_PROGRAM_ID,
+      ASSOCIATED_TOKEN_PROGRAM_ID
+    );
+
+    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+    const tx = new Transaction();
+    tx.recentBlockhash = blockhash;
+    tx.feePayer = wallet.publicKey;
+    tx.add(ix);
+    tx.sign(wallet);
+
+    const sig = await connection.sendRawTransaction(tx.serialize(), {
+      skipPreflight: true,
+    });
+
+    await connection.confirmTransaction({
+      signature: sig,
+      blockhash,
+      lastValidBlockHeight,
+    });
+
+    console.log(`トークンアカウント作成完了!`);
+    return true;
+  } catch (error) {
+    console.error("トークンアカウント作成エラー:", error.message);
+    return false;
+  }
+}
+
 async function buyToken(tokenMint, solPriceUsd, isPumpFun = false) {
   console.log(`USDC購入開始: ${tokenMint}`);
   try {
     const wallet = getWallet();
     const connection = getConnection();
+
+    // 購入前にトークンアカウントを自動作成
+    await createTokenAccountIfNeeded(connection, wallet, tokenMint);
+
     const usdcAmount = usdcToAmount(TRADE_CONFIG.BUY_AMOUNT_USDC);
     console.log(`買い金額: $${TRADE_CONFIG.BUY_AMOUNT_USDC} USDC = ${usdcAmount}`);
 
@@ -70,7 +132,6 @@ async function buyToken(tokenMint, solPriceUsd, isPumpFun = false) {
       wallet: wallet.publicKey.toString(),
       wrapSol: false,
       unwrapSol: false,
-      setupTokenAccounts: true,
     }, { timeout: 15000 });
 
     if (!txRes.data?.success) {
@@ -138,7 +199,6 @@ async function sellToken(position, currentPrice, reason) {
       wallet: wallet.publicKey.toString(),
       wrapSol: false,
       unwrapSol: false,
-      setupTokenAccounts: true,
     }, { timeout: 15000 });
 
     if (!txRes.data?.success) {
