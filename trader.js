@@ -1,15 +1,15 @@
 const axios = require("axios");
 const {
   Connection, Keypair, VersionedTransaction,
-  Transaction, LAMPORTS_PER_SOL
+  LAMPORTS_PER_SOL
 } = require("@solana/web3.js");
 const bs58 = require("bs58");
 
 const TRADE_CONFIG = {
-  BUY_AMOUNT_USD: 5,
-  TAKE_PROFIT_PERCENT: 30,
-  STOP_LOSS_PERCENT: -20,
-  SLIPPAGE: 10,
+  BUY_AMOUNT_USD: 3,
+  TAKE_PROFIT_PERCENT: 3,
+  STOP_LOSS_PERCENT: -5,
+  SLIPPAGE: 1,
   SOL_MINT: "So11111111111111111111111111111111111111112",
   RAYDIUM_SWAP_API: "https://transaction-v1.raydium.io/compute/swap-base-in",
   RAYDIUM_TX_API: "https://transaction-v1.raydium.io/transaction/swap-base-in",
@@ -41,14 +41,12 @@ async function usdToSol(usdAmount, solPriceUsd) {
   return usdAmount / solPriceUsd;
 }
 
-// PumpFun専用の購入関数
 async function buyTokenPumpFun(tokenMint, solPriceUsd) {
   console.log(`PumpFun購入開始: ${tokenMint}`);
   try {
     const wallet = getWallet();
     const connection = getConnection();
     const solAmount = await usdToSol(TRADE_CONFIG.BUY_AMOUNT_USD, solPriceUsd);
-    console.log(`買い金額: $${TRADE_CONFIG.BUY_AMOUNT_USD} = ${solAmount.toFixed(4)} SOL`);
 
     const response = await axios.post(TRADE_CONFIG.PUMPFUN_API, {
       publicKey: wallet.publicKey.toString(),
@@ -65,14 +63,9 @@ async function buyTokenPumpFun(tokenMint, solPriceUsd) {
       timeout: 15000,
     });
 
-    if (response.data.byteLength === 0) {
-      console.error("PumpFunトランザクション取得失敗");
-      return null;
-    }
+    if (response.data.byteLength === 0) return null;
 
-    const transaction = VersionedTransaction.deserialize(
-      new Uint8Array(response.data)
-    );
+    const transaction = VersionedTransaction.deserialize(new Uint8Array(response.data));
     transaction.sign([wallet]);
 
     const txid = await connection.sendRawTransaction(
@@ -82,28 +75,24 @@ async function buyTokenPumpFun(tokenMint, solPriceUsd) {
 
     console.log(`✅ PumpFun購入成功! TX: ${txid}`);
     return {
-      txid,
-      tokenMint,
+      txid, tokenMint,
       buyAmountUsd: TRADE_CONFIG.BUY_AMOUNT_USD,
-      buyPrice: 0,
-      tokenAmount: 0,
-      timestamp: Date.now(),
-      isPumpFun: true,
+      buyPrice: 0, tokenAmount: 0,
+      timestamp: Date.now(), isPumpFun: true,
     };
-
   } catch (error) {
     console.error("PumpFun購入エラー:", error.message);
     return null;
   }
 }
 
-// Raydium専用の購入関数
 async function buyTokenRaydium(tokenMint, solPriceUsd) {
   console.log(`Raydium購入開始: ${tokenMint}`);
   try {
     const wallet = getWallet();
     const connection = getConnection();
     const lamports = await usdToLamports(TRADE_CONFIG.BUY_AMOUNT_USD, solPriceUsd);
+    console.log(`買い金額: $${TRADE_CONFIG.BUY_AMOUNT_USD} = ${lamports} lamports`);
 
     const quoteRes = await axios.get(TRADE_CONFIG.RAYDIUM_SWAP_API, {
       params: {
@@ -131,10 +120,7 @@ async function buyTokenRaydium(tokenMint, solPriceUsd) {
       unwrapSol: true,
     }, { timeout: 15000 });
 
-    if (!txRes.data?.success) {
-      console.error("Raydiumトランザクション失敗:", txRes.data?.msg);
-      return null;
-    }
+    if (!txRes.data?.success) return null;
 
     const transactions = txRes.data?.data;
     if (!transactions || transactions.length === 0) return null;
@@ -152,35 +138,27 @@ async function buyTokenRaydium(tokenMint, solPriceUsd) {
     }
 
     return {
-      txid,
-      tokenMint,
+      txid, tokenMint,
       buyAmountUsd: TRADE_CONFIG.BUY_AMOUNT_USD,
       buyPrice: lamports / parseFloat(quote?.data?.outputAmount || 1),
       tokenAmount: parseFloat(quote?.data?.outputAmount || 0),
-      timestamp: Date.now(),
-      isPumpFun: false,
+      timestamp: Date.now(), isPumpFun: false,
     };
-
   } catch (error) {
     console.error("Raydium購入エラー:", error.message);
     return null;
   }
 }
 
-// メインの購入関数（PumpFun → Raydiumの順で試す）
 async function buyToken(tokenMint, solPriceUsd, isPumpFun = false) {
   if (isPumpFun) {
-    console.log("PumpFunコイン → PumpFun APIで購入");
     return await buyTokenPumpFun(tokenMint, solPriceUsd);
-  } else {
-    console.log("通常コイン → Raydium APIで購入");
-    const result = await buyTokenRaydium(tokenMint, solPriceUsd);
-    if (!result) {
-      console.log("Raydium失敗 → PumpFunで試みる");
-      return await buyTokenPumpFun(tokenMint, solPriceUsd);
-    }
-    return result;
   }
+  const result = await buyTokenRaydium(tokenMint, solPriceUsd);
+  if (!result) {
+    return await buyTokenPumpFun(tokenMint, solPriceUsd);
+  }
+  return result;
 }
 
 async function sellToken(position, currentPrice, reason) {
@@ -189,9 +167,7 @@ async function sellToken(position, currentPrice, reason) {
     const wallet = getWallet();
     const connection = getConnection();
 
-    // PumpFunコインはPumpFun APIで売る
     if (position.isPumpFun) {
-      console.log("PumpFunコイン → PumpFun APIで売却");
       const response = await axios.post(TRADE_CONFIG.PUMPFUN_API, {
         publicKey: wallet.publicKey.toString(),
         action: "sell",
@@ -207,26 +183,18 @@ async function sellToken(position, currentPrice, reason) {
         timeout: 15000,
       });
 
-      if (response.data.byteLength === 0) {
-        console.error("PumpFun売却トランザクション取得失敗");
-        return null;
-      }
+      if (response.data.byteLength === 0) return null;
 
-      const transaction = VersionedTransaction.deserialize(
-        new Uint8Array(response.data)
-      );
+      const transaction = VersionedTransaction.deserialize(new Uint8Array(response.data));
       transaction.sign([wallet]);
-
       const txid = await connection.sendRawTransaction(
         transaction.serialize(),
         { skipPreflight: true, maxRetries: 3 }
       );
-
       console.log(`✅ PumpFun売却成功! TX: ${txid}`);
       return { txid, reason, currentPrice };
     }
 
-    // Raydiumで売る
     const quoteRes = await axios.get(TRADE_CONFIG.RAYDIUM_SWAP_API, {
       params: {
         inputMint: position.tokenMint,
@@ -253,10 +221,7 @@ async function sellToken(position, currentPrice, reason) {
       unwrapSol: true,
     }, { timeout: 15000 });
 
-    if (!txRes.data?.success) {
-      console.error("売りトランザクション失敗:", txRes.data?.msg);
-      return null;
-    }
+    if (!txRes.data?.success) return null;
 
     const transactions = txRes.data?.data;
     let txid = null;
@@ -273,7 +238,6 @@ async function sellToken(position, currentPrice, reason) {
     }
 
     return { txid, reason, currentPrice };
-
   } catch (error) {
     console.error("売り注文エラー:", error.message);
     return null;
