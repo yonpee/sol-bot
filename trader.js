@@ -1,97 +1,170 @@
-require("dotenv").config();
-const cron = require("node-cron");
-const { getSolanaPrice } = require("./priceChecker");
-const { sendDiscordNotification, sendStartupNotification } = require("./notifier");
-const { checkTrends } = require("./trendScanner");
-const { monitorPositions } = require("./portfolio");
+const axios = require("axios");
+const {
+  Connection, Keypair, VersionedTransaction,
+  LAMPORTS_PER_SOL
+} = require("@solana/web3.js");
+const bs58 = require("bs58");
 
-const CONFIG = {
-  CHECK_INTERVAL_MINUTES: 1,
-  PRICE_HISTORY_MINUTES: 5,
-  DROP_THRESHOLD_PERCENT: 3.0,
+const TRADE_CONFIG = {
+  BUY_AMOUNT_USDC: 3,
+  TAKE_PROFIT_PERCENT: 3,
+  STOP_LOSS_PERCENT: -5,
+  SLIPPAGE: 1,
+  SOL_MINT: "So11111111111111111111111111111111111111112",
+  USDC_MINT: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+  RAYDIUM_SWAP_API: "https://transaction-v1.raydium.io/compute/swap-base-in",
+  RAYDIUM_TX_API: "https://transaction-v1.raydium.io/transaction/swap-base-in",
 };
 
-const priceHistory = [];
-module.exports = { CONFIG };
+function getWallet() {
+  const privateKey = process.env.WALLET_PRIVATE_KEY;
+  if (!privateKey) throw new Error("WALLET_PRIVATE_KEY が未設定！");
+  try {
+    const secretKey = bs58.decode(privateKey);
+    return Keypair.fromSecretKey(secretKey);
+  } catch (error) {
+    throw new Error("秘密鍵の形式エラー: " + error.message);
+  }
+}
 
-function checkEnvironmentVariables() {
-  console.log("🔍 環境変数をチェック中...");
-  const requiredVars = ["DISCORD_WEBHOOK_URL", "WALLET_PRIVATE_KEY"];
-  let hasError = false;
-  for (const varName of requiredVars) {
-    if (!process.env[varName]) {
-      console.error(`❌ ${varName} が未設定！`);
-      hasError = true;
-    } else {
-      console.log(`✅ ${varName}: 設定済み`);
+function getConnection() {
+  const rpcUrl = process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
+  return new Connection(rpcUrl, "confirmed");
+}
+
+// USDC は6デシマル
+function usdcToAmount(usdcAmount) {
+  return Math.floor(usdcAmount * 1_000_000);
+}
+
+async function buyToken(tokenMint, solPriceUsd, isPumpFun = false) {
+  console.log(`USDC購入開始: ${tokenMint}`);
+  try {
+    const wallet = getWallet();
+    const connection = getConnection();
+    const usdcAmount = usdcToAmount(TRADE_CONFIG.BUY_AMOUNT_USDC);
+    console.log(`買い金額: $${TRADE_CONFIG.BUY_AMOUNT_USDC} USDC = ${usdcAmount}`);
+
+    const quoteRes = await axios.get(TRADE_CONFIG.RAYDIUM_SWAP_API, {
+      params: {
+        inputMint: TRADE_CONFIG.USDC_MINT,
+        outputMint: tokenMint,
+        amount: usdcAmount,
+        slippageBps: TRADE_CONFIG.SLIPPAGE * 100,
+        txVersion: "V0",
+      },
+      timeout: 15000,
+    });
+
+    const quote = quoteRes.data;
+    if (!quote?.success) {
+      console.error("クォート失敗:", quote?.msg);
+      return null;
     }
-  }
-  if (hasError) { process.exit(1); }
-  console.log("✅ 環境変数チェック完了！\n");
-}
 
-function updatePriceHistory(priceData) {
-  priceHistory.push({ price: priceData.price, timestamp: priceData.timestamp });
-  const cutoffTime = Date.now() - CONFIG.PRICE_HISTORY_MINUTES * 2 * 60 * 1000;
-  while (priceHistory.length > 0 && priceHistory[0].timestamp < cutoffTime) {
-    priceHistory.shift();
-  }
-}
+    console.log(`取得予定数量: ${quote?.data?.outputAmount}`);
 
-function detectPriceDrop(currentPrice) {
-  const compareTime = Date.now() - CONFIG.PRICE_HISTORY_MINUTES * 60 * 1000;
-  const oldPrices = priceHistory.filter((p) => p.timestamp <= compareTime + 30000);
-  if (oldPrices.length === 0) return null;
-  const oldestPrice = oldPrices[oldPrices.length - 1];
-  const priceChange = ((currentPrice - oldestPrice.price) / oldestPrice.price) * 100;
-  return {
-    oldPrice: oldestPrice.price,
-    changePercent: priceChange,
-    minutesAgo: Math.round((Date.now() - oldestPrice.timestamp) / 1000 / 60),
-  };
-}
+    const txRes = await axios.post(TRADE_CONFIG.RAYDIUM_TX_API, {
+      computeUnitPriceMicroLamports: "100000",
+      swapResponse: quote,
+      txVersion: "V0",
+      wallet: wallet.publicKey.toString(),
+      wrapSol: false,
+      unwrapSol: false,
+    }, { timeout: 15000 });
 
-async function checkPrice() {
-  const now = new Date().toLocaleTimeString("ja-JP", { timeZone: "Asia/Tokyo" });
-  console.log(`\n⏰ [${now}] チェック開始...`);
-  const priceData = await getSolanaPrice();
-  if (!priceData) { console.log("⚠️ 価格取得失敗"); return null; }
-  console.log(`💰 SOL: $${priceData.price.toFixed(4)}`);
-  updatePriceHistory(priceData);
-  const dropInfo = detectPriceDrop(priceData.price);
-  if (!dropInfo) { console.log("📊 比較データ収集中..."); return priceData; }
-  console.log(`📉 ${dropInfo.minutesAgo}分前比較: ${dropInfo.changePercent.toFixed(2)}%`);
-  if (dropInfo.changePercent <= -CONFIG.DROP_THRESHOLD_PERCENT) {
-    await sendDiscordNotification(priceData, dropInfo);
-  } else {
-    console.log("✅ 異常なし");
-  }
-  return priceData;
-}
-
-async function startBot() {
-  console.log("🚀 Solana Trade Bot 起動中...");
-  checkEnvironmentVariables();
-
-  const priceData = await checkPrice();
-  if (priceData) {
-    await checkTrends(priceData.price);
-    await monitorPositions();
-  }
-
-  cron.schedule(`*/${CONFIG.CHECK_INTERVAL_MINUTES} * * * *`, async () => {
-    const pd = await checkPrice();
-    if (pd) {
-      await checkTrends(pd.price);
-      await monitorPositions();
+    if (!txRes.data?.success) {
+      console.error("トランザクション失敗:", txRes.data?.msg);
+      return null;
     }
-  });
 
-  console.log("✅ Bot稼働中！");
+    const transactions = txRes.data?.data;
+    if (!transactions || transactions.length === 0) return null;
+
+    let txid = null;
+    for (const txData of transactions) {
+      const txBuffer = Buffer.from(txData.transaction, "base64");
+      const transaction = VersionedTransaction.deserialize(txBuffer);
+      transaction.sign([wallet]);
+      txid = await connection.sendRawTransaction(
+        transaction.serialize(),
+        { skipPreflight: true, maxRetries: 3 }
+      );
+      console.log(`✅ USDC購入成功! TX: ${txid}`);
+    }
+
+    return {
+      txid, tokenMint,
+      buyAmountUsd: TRADE_CONFIG.BUY_AMOUNT_USDC,
+      buyPrice: usdcAmount / parseFloat(quote?.data?.outputAmount || 1),
+      tokenAmount: parseFloat(quote?.data?.outputAmount || 0),
+      timestamp: Date.now(),
+      isPumpFun: false,
+    };
+
+  } catch (error) {
+    console.error("USDC購入エラー:", error.message);
+    return null;
+  }
 }
 
-process.on("uncaughtException", (e) => { console.error("🔥 エラー:", e.message); });
-process.on("unhandledRejection", (r) => { console.error("🔥 Promiseエラー:", r); });
-process.on("SIGINT", () => { console.log("\n👋 Bot停止"); process.exit(0); });
+async function sellToken(position, currentPrice, reason) {
+  console.log(`売り注文開始: ${position.tokenMint} (${reason})`);
+  try {
+    const wallet = getWallet();
+    const connection = getConnection();
 
-startBot().catch((e) => { console.error("🔥 起動エラー:", e); process.exit(1); });
+    const quoteRes = await axios.get(TRADE_CONFIG.RAYDIUM_SWAP_API, {
+      params: {
+        inputMint: position.tokenMint,
+        outputMint: TRADE_CONFIG.USDC_MINT,
+        amount: Math.floor(position.tokenAmount),
+        slippageBps: TRADE_CONFIG.SLIPPAGE * 100,
+        txVersion: "V0",
+      },
+      timeout: 15000,
+    });
+
+    const quote = quoteRes.data;
+    if (!quote?.success) {
+      console.error("売りクォート失敗:", quote?.msg);
+      return null;
+    }
+
+    const txRes = await axios.post(TRADE_CONFIG.RAYDIUM_TX_API, {
+      computeUnitPriceMicroLamports: "100000",
+      swapResponse: quote,
+      txVersion: "V0",
+      wallet: wallet.publicKey.toString(),
+      wrapSol: false,
+      unwrapSol: false,
+    }, { timeout: 15000 });
+
+    if (!txRes.data?.success) {
+      console.error("売りトランザクション失敗:", txRes.data?.msg);
+      return null;
+    }
+
+    const transactions = txRes.data?.data;
+    let txid = null;
+
+    for (const txData of transactions) {
+      const txBuffer = Buffer.from(txData.transaction, "base64");
+      const transaction = VersionedTransaction.deserialize(txBuffer);
+      transaction.sign([wallet]);
+      txid = await connection.sendRawTransaction(
+        transaction.serialize(),
+        { skipPreflight: true, maxRetries: 3 }
+      );
+      console.log(`✅ USDC売却成功! TX: ${txid}`);
+    }
+
+    return { txid, reason, currentPrice };
+
+  } catch (error) {
+    console.error("売り注文エラー:", error.message);
+    return null;
+  }
+}
+
+module.exports = { buyToken, sellToken, TRADE_CONFIG };
