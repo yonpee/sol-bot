@@ -1,14 +1,14 @@
 const axios = require("axios");
 const {
   Connection, Keypair, VersionedTransaction,
-  LAMPORTS_PER_SOL
+  PublicKey, LAMPORTS_PER_SOL
 } = require("@solana/web3.js");
 const bs58 = require("bs58");
 
 const TRADE_CONFIG = {
-  BUY_AMOUNT_USDC: 3,
+  BUY_AMOUNT_USDC: 10,
   TAKE_PROFIT_PERCENT: 3,
-  STOP_LOSS_PERCENT: -5,
+  STOP_LOSS_PERCENT: -3,
   SLIPPAGE: 1,
   SOL_MINT: "So11111111111111111111111111111111111111112",
   USDC_MINT: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
@@ -32,9 +32,48 @@ function getConnection() {
   return new Connection(rpcUrl, "confirmed");
 }
 
-// USDC は6デシマル
 function usdcToAmount(usdcAmount) {
   return Math.floor(usdcAmount * 1_000_000);
+}
+
+async function ensureTokenAccount(connection, wallet, mintAddress) {
+  try {
+    const { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } = require("@solana/spl-token");
+
+    const mint = new PublicKey(mintAddress);
+    const ata = await getAssociatedTokenAddress(mint, wallet.publicKey);
+
+    const accountInfo = await connection.getAccountInfo(ata);
+    if (accountInfo) {
+      console.log(`トークンアカウント存在確認: OK`);
+      return ata;
+    }
+
+    console.log(`トークンアカウント作成中...`);
+    const ix = createAssociatedTokenAccountInstruction(
+      wallet.publicKey,
+      ata,
+      wallet.publicKey,
+      mint,
+      TOKEN_PROGRAM_ID,
+      ASSOCIATED_TOKEN_PROGRAM_ID
+    );
+
+    const { blockhash } = await connection.getLatestBlockhash();
+    const tx = new (require("@solana/web3.js").Transaction)();
+    tx.recentBlockhash = blockhash;
+    tx.feePayer = wallet.publicKey;
+    tx.add(ix);
+    tx.sign(wallet);
+
+    const sig = await connection.sendRawTransaction(tx.serialize());
+    await connection.confirmTransaction(sig);
+    console.log(`トークンアカウント作成完了: ${sig}`);
+    return ata;
+  } catch (error) {
+    console.error("トークンアカウント確認エラー:", error.message);
+    return null;
+  }
 }
 
 async function buyToken(tokenMint, solPriceUsd, isPumpFun = false) {
@@ -90,7 +129,7 @@ async function buyToken(tokenMint, solPriceUsd, isPumpFun = false) {
         transaction.serialize(),
         { skipPreflight: true, maxRetries: 3 }
       );
-      console.log(`✅ USDC購入成功! TX: ${txid}`);
+      console.log(`購入成功! TX: ${txid}`);
     }
 
     return {
@@ -156,7 +195,7 @@ async function sellToken(position, currentPrice, reason) {
         transaction.serialize(),
         { skipPreflight: true, maxRetries: 3 }
       );
-      console.log(`✅ USDC売却成功! TX: ${txid}`);
+      console.log(`売却成功! TX: ${txid}`);
     }
 
     return { txid, reason, currentPrice };
