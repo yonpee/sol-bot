@@ -74,7 +74,7 @@ async function sendBuyNotification(symbol, price, priceChange5m, txid, dexLink) 
         fields: [
           { name: "💰 価格", value: `$${price.toFixed(8)}`, inline: true },
           { name: "📈 5分変化", value: `+${priceChange5m.toFixed(2)}%`, inline: true },
-          { name: "💵 金額", value: "$3 USDC", inline: true },
+          { name: "💵 金額", value: "$10 SOL", inline: true },
           { name: "🔗 TX", value: `[確認](https://solscan.io/tx/${txid})`, inline: false },
           { name: "🔗 Chart", value: `[DexScreener](${dexLink})`, inline: false },
         ],
