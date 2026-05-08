@@ -1,23 +1,16 @@
 const axios = require("axios");
 const {
   Connection, Keypair, VersionedTransaction,
-  PublicKey, Transaction,
+  LAMPORTS_PER_SOL,
 } = require("@solana/web3.js");
-const {
-  getAssociatedTokenAddress,
-  createAssociatedTokenAccountInstruction,
-  TOKEN_PROGRAM_ID,
-  ASSOCIATED_TOKEN_PROGRAM_ID,
-} = require("@solana/spl-token");
 const bs58 = require("bs58");
 
 const TRADE_CONFIG = {
-  BUY_AMOUNT_USDC: 10,
+  BUY_AMOUNT_USD: 10,
   TAKE_PROFIT_PERCENT: 3,
   STOP_LOSS_PERCENT: -3,
   SLIPPAGE: 1,
   SOL_MINT: "So11111111111111111111111111111111111111112",
-  USDC_MINT: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
   RAYDIUM_SWAP_API: "https://transaction-v1.raydium.io/compute/swap-base-in",
   RAYDIUM_TX_API: "https://transaction-v1.raydium.io/transaction/swap-base-in",
 };
@@ -34,56 +27,23 @@ function getConnection() {
   return new Connection(rpcUrl, "confirmed");
 }
 
-function usdcToAmount(usdcAmount) {
-  return Math.floor(usdcAmount * 1_000_000);
-}
-
-async function createTokenAccount(connection, wallet, mintAddress) {
-  const mint = new PublicKey(mintAddress);
-  const ata = await getAssociatedTokenAddress(
-    mint, wallet.publicKey, false,
-    TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID
-  );
-  const info = await connection.getAccountInfo(ata);
-  if (info) {
-    console.log("トークンアカウントOK");
-    return true;
-  }
-  console.log("トークンアカウント作成中...");
-  const ix = createAssociatedTokenAccountInstruction(
-    wallet.publicKey, ata, wallet.publicKey, mint,
-    TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID
-  );
-  const { blockhash, lastValidBlockHeight } =
-    await connection.getLatestBlockhash("finalized");
-  const tx = new Transaction({ recentBlockhash: blockhash, feePayer: wallet.publicKey });
-  tx.add(ix);
-  tx.sign(wallet);
-  const sig = await connection.sendRawTransaction(tx.serialize(), { skipPreflight: false });
-  await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight });
-  console.log("トークンアカウント作成完了!");
-  return true;
+async function usdToLamports(usdAmount, solPriceUsd) {
+  return Math.floor((usdAmount / solPriceUsd) * LAMPORTS_PER_SOL);
 }
 
 async function buyToken(tokenMint, solPriceUsd, isPumpFun = false) {
-  console.log("USDC購入開始:", tokenMint);
-  const wallet = getWallet();
-  const connection = getConnection();
-  const usdcAmount = usdcToAmount(TRADE_CONFIG.BUY_AMOUNT_USDC);
-  console.log(`買い金額: $${TRADE_CONFIG.BUY_AMOUNT_USDC} USDC`);
-
+  console.log("SOL購入開始:", tokenMint);
   try {
-    await createTokenAccount(connection, wallet, tokenMint);
-  } catch (e) {
-    console.log("アカウント作成スキップ:", e.message);
-  }
+    const wallet = getWallet();
+    const connection = getConnection();
+    const lamports = await usdToLamports(TRADE_CONFIG.BUY_AMOUNT_USD, solPriceUsd);
+    console.log(`買い金額: $${TRADE_CONFIG.BUY_AMOUNT_USD} = ${lamports} lamports`);
 
-  try {
     const quoteRes = await axios.get(TRADE_CONFIG.RAYDIUM_SWAP_API, {
       params: {
-        inputMint: TRADE_CONFIG.USDC_MINT,
+        inputMint: TRADE_CONFIG.SOL_MINT,
         outputMint: tokenMint,
-        amount: usdcAmount,
+        amount: lamports,
         slippageBps: TRADE_CONFIG.SLIPPAGE * 100,
         txVersion: "V0",
       },
@@ -103,8 +63,8 @@ async function buyToken(tokenMint, solPriceUsd, isPumpFun = false) {
       swapResponse: quote,
       txVersion: "V0",
       wallet: wallet.publicKey.toString(),
-      wrapSol: false,
-      unwrapSol: false,
+      wrapSol: true,
+      unwrapSol: true,
     }, { timeout: 15000 });
 
     if (!txRes.data?.success) {
@@ -128,14 +88,14 @@ async function buyToken(tokenMint, solPriceUsd, isPumpFun = false) {
 
     return {
       txid, tokenMint,
-      buyAmountUsd: TRADE_CONFIG.BUY_AMOUNT_USDC,
-      buyPrice: usdcAmount / parseFloat(quote?.data?.outputAmount || 1),
+      buyAmountUsd: TRADE_CONFIG.BUY_AMOUNT_USD,
+      buyPrice: lamports / parseFloat(quote?.data?.outputAmount || 1),
       tokenAmount: parseFloat(quote?.data?.outputAmount || 0),
       timestamp: Date.now(),
       isPumpFun: false,
     };
   } catch (error) {
-    console.error("USDC購入エラー:", error.message);
+    console.error("SOL購入エラー:", error.message);
     return null;
   }
 }
@@ -149,7 +109,7 @@ async function sellToken(position, currentPrice, reason) {
     const quoteRes = await axios.get(TRADE_CONFIG.RAYDIUM_SWAP_API, {
       params: {
         inputMint: position.tokenMint,
-        outputMint: TRADE_CONFIG.USDC_MINT,
+        outputMint: TRADE_CONFIG.SOL_MINT,
         amount: Math.floor(position.tokenAmount),
         slippageBps: TRADE_CONFIG.SLIPPAGE * 100,
         txVersion: "V0",
@@ -168,8 +128,8 @@ async function sellToken(position, currentPrice, reason) {
       swapResponse: quote,
       txVersion: "V0",
       wallet: wallet.publicKey.toString(),
-      wrapSol: false,
-      unwrapSol: false,
+      wrapSol: true,
+      unwrapSol: true,
     }, { timeout: 15000 });
 
     if (!txRes.data?.success) {
