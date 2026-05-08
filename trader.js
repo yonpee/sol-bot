@@ -1,7 +1,7 @@
 const axios = require("axios");
 const {
   Connection, Keypair, VersionedTransaction,
-  PublicKey, LAMPORTS_PER_SOL
+  LAMPORTS_PER_SOL
 } = require("@solana/web3.js");
 const bs58 = require("bs58");
 
@@ -34,46 +34,6 @@ function getConnection() {
 
 function usdcToAmount(usdcAmount) {
   return Math.floor(usdcAmount * 1_000_000);
-}
-
-async function ensureTokenAccount(connection, wallet, mintAddress) {
-  try {
-    const { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } = require("@solana/spl-token");
-
-    const mint = new PublicKey(mintAddress);
-    const ata = await getAssociatedTokenAddress(mint, wallet.publicKey);
-
-    const accountInfo = await connection.getAccountInfo(ata);
-    if (accountInfo) {
-      console.log(`トークンアカウント存在確認: OK`);
-      return ata;
-    }
-
-    console.log(`トークンアカウント作成中...`);
-    const ix = createAssociatedTokenAccountInstruction(
-      wallet.publicKey,
-      ata,
-      wallet.publicKey,
-      mint,
-      TOKEN_PROGRAM_ID,
-      ASSOCIATED_TOKEN_PROGRAM_ID
-    );
-
-    const { blockhash } = await connection.getLatestBlockhash();
-    const tx = new (require("@solana/web3.js").Transaction)();
-    tx.recentBlockhash = blockhash;
-    tx.feePayer = wallet.publicKey;
-    tx.add(ix);
-    tx.sign(wallet);
-
-    const sig = await connection.sendRawTransaction(tx.serialize());
-    await connection.confirmTransaction(sig);
-    console.log(`トークンアカウント作成完了: ${sig}`);
-    return ata;
-  } catch (error) {
-    console.error("トークンアカウント確認エラー:", error.message);
-    return null;
-  }
 }
 
 async function buyToken(tokenMint, solPriceUsd, isPumpFun = false) {
@@ -110,6 +70,7 @@ async function buyToken(tokenMint, solPriceUsd, isPumpFun = false) {
       wallet: wallet.publicKey.toString(),
       wrapSol: false,
       unwrapSol: false,
+      setupTokenAccounts: true,
     }, { timeout: 15000 });
 
     if (!txRes.data?.success) {
@@ -177,6 +138,7 @@ async function sellToken(position, currentPrice, reason) {
       wallet: wallet.publicKey.toString(),
       wrapSol: false,
       unwrapSol: false,
+      setupTokenAccounts: true,
     }, { timeout: 15000 });
 
     if (!txRes.data?.success) {
