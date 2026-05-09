@@ -3,13 +3,14 @@ const axios = require("axios");
 async function getSolanaPrice() {
   try {
     const response = await axios.get(
-      "https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd",
+      "https://api.binance.com/api/v3/ticker/price?symbol=SOLUSDT",
       { timeout: 10000 }
     );
-    const price = response.data?.solana?.usd;
+    const price = parseFloat(response.data?.price);
     if (!price) return null;
+    console.log("SOL価格取得成功: $" + price.toFixed(4));
     return {
-      price: parseFloat(price),
+      price: price,
       timestamp: Date.now(),
     };
   } catch (error) {
