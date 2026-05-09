@@ -40,7 +40,7 @@ async function analyzeWithClaude(tokenSymbol, marketData) {
     const response = await axios.post(
       "https://api.anthropic.com/v1/messages",
       {
-        model: "claude-sonnet-4-20250514",
+        model: "claude-sonnet-4-5",
         max_tokens: 300,
         messages: [{ role: "user", content: prompt }],
       },
@@ -95,7 +95,7 @@ async function getAiMarketSentiment() {
     const response = await axios.post(
       "https://api.anthropic.com/v1/messages",
       {
-        model: "claude-sonnet-4-20250514",
+        model: "claude-sonnet-4-5",
         max_tokens: 200,
         messages: [{ role: "user", content: prompt }],
       },
