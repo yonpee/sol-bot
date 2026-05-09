@@ -2,6 +2,7 @@ const axios = require("axios");
 const { buyToken } = require("./trader");
 const { addPosition, positions } = require("./portfolio");
 const { analyzeWithClaude, getAiMarketSentiment } = require("./aiAnalyzer");
+const { addTradeHistory } = require("./api");
 
 const WATCH_TOKENS = [
   { symbol: "JUP",     address: "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN" },
@@ -210,9 +211,22 @@ async function checkTrends(solPriceUsd) {
     console.log("流動性チェック中: " + result.token.symbol);
     const tradeResult = await buyToken(result.token.address, solPriceUsd, false);
     if (tradeResult) {
+      // symbolをtradeResultに追加
+      tradeResult.symbol = result.token.symbol;
       addPosition(tradeResult);
       purchasedTokens.add(result.token.address);
       console.log("購入成功: " + result.token.symbol);
+
+      // 取引履歴に記録
+      addTradeHistory({
+        symbol: result.token.symbol,
+        type: "buy",
+        amount: tradeResult.buyAmountUsd,
+        profit: null,
+        reason: result.analysis.reasons.join(" / "),
+        txid: tradeResult.txid,
+      });
+
       selectedResult = { result, tradeResult };
       break;
     } else {
