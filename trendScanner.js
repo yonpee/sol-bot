@@ -22,7 +22,7 @@ const WATCH_TOKENS = [
 
 const CONFIG = {
   MIN_PRICE_CHANGE_5M: 1,
-  MIN_SCORE: 50,
+  MIN_SCORE: 40,
   MAX_POSITIONS: 1,
   REQUEST_INTERVAL_MS: 500,
   RATE_LIMIT_WAIT_MS: 60000,
@@ -46,7 +46,7 @@ async function getSolTrend() {
       parseFloat(b.liquidity?.usd || 0) > parseFloat(a.liquidity?.usd || 0) ? b : a
     );
     solTrend = parseFloat(best.priceChange?.h1 || 0);
-    console.log("SOLトレンド(1h):", solTrend.toFixed(2) + "%");
+    console.log("SOLトレンド(1h): " + solTrend.toFixed(2) + "%");
     return solTrend;
   } catch (error) {
     return 0;
@@ -68,7 +68,7 @@ function analyzeToken(pair) {
 
   if (priceChange5m >= 1) { score += 30; reasons.push("5m+" + priceChange5m.toFixed(1) + "%"); }
   if (priceChange1h > 0) { score += 20; reasons.push("1時間プラス"); }
-  else { score -= 10; }
+  else { score -= 5; }
   if (priceChange24h > 0) { score += 10; reasons.push("24時間上昇"); }
 
   const volumeRatio = volume6h > 0 ? (volume24h / 4) / volume6h : 1;
@@ -77,7 +77,7 @@ function analyzeToken(pair) {
   const txRatio = txns1h > 0 ? (txns5m * 12) / txns1h : 1;
   if (txRatio > 1.5) { score += 15; reasons.push("取引" + txRatio.toFixed(1) + "倍増"); }
 
-  if (solTrend < -2) { score -= 20; reasons.push("SOL下落注意"); }
+  if (solTrend < -3) { score -= 15; reasons.push("SOL下落注意"); }
   if (liquidity < 100000) { score -= 30; reasons.push("流動性低"); }
 
   return { score, reasons, priceChange5m, priceChange1h, priceChange24h };
@@ -117,8 +117,7 @@ async function sendBuyNotification(symbol, analysis, aiResult, txid, dexLink) {
   const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
   if (!webhookUrl) return;
 
-  const now = new Date();
-  const jstTime = now.toLocaleTimeString("ja-JP", { timeZone: "Asia/Tokyo" });
+  const jstTime = new Date().toLocaleTimeString("ja-JP", { timeZone: "Asia/Tokyo" });
   const sentimentEmoji = aiResult.sentiment === "bullish" ? "🟢"
     : aiResult.sentiment === "bearish" ? "🔴" : "🟡";
 
@@ -126,18 +125,16 @@ async function sendBuyNotification(symbol, analysis, aiResult, txid, dexLink) {
     await axios.post(webhookUrl, {
       content: "🤖 **AI判断で自動購入！**",
       embeds: [{
-        title: symbol + " 購入 (スコア: " + (analysis.score + (aiResult.score || 0)) + ")",
+        title: symbol + " 購入 (スコア: " + analysis.score + ")",
         color: 0x00ff00,
         fields: [
           { name: "📈 5分変化", value: "+" + analysis.priceChange5m.toFixed(2) + "%", inline: true },
           { name: "📊 1時間変化", value: analysis.priceChange1h.toFixed(2) + "%", inline: true },
-          { name: "📉 24時間変化", value: analysis.priceChange24h.toFixed(2) + "%", inline: true },
           { name: "💵 金額", value: "$10相当のSOL", inline: true },
           { name: "🎯 利確", value: "+8%", inline: true },
           { name: "🔴 損切り", value: "-4%", inline: true },
-          { name: "📊 テクニカル理由", value: analysis.reasons.join("\n") || "なし", inline: false },
-          { name: sentimentEmoji + " AI判断", value: aiResult.sentiment + " | " + (aiResult.reason || "分析完了"), inline: false },
-          { name: "🌍 市場環境", value: cachedMarketSentiment.reason || "不明", inline: false },
+          { name: sentimentEmoji + " AI", value: aiResult.reason || "分析完了", inline: true },
+          { name: "📊 理由", value: analysis.reasons.join(" / ") || "なし", inline: false },
           { name: "🔗 TX", value: "[確認](https://solscan.io/tx/" + txid + ")", inline: false },
           { name: "🔗 Chart", value: "[DexScreener](" + dexLink + ")", inline: false },
         ],
@@ -159,11 +156,13 @@ async function checkTrends(solPriceUsd) {
 
   await getSolTrend();
 
-  if (solTrend < -3) {
-    console.log("SOL下落中(" + solTrend.toFixed(2) + "%) → 購入見送り");
+  // SOLが大幅下落中のみ見送り（-5%以上）
+  if (solTrend < -5) {
+    console.log("SOL大幅下落中(" + solTrend.toFixed(2) + "%) → 購入見送り");
     return;
   }
 
+  // AI市場分析（10分ごとに更新）
   const now = Date.now();
   if (now - lastAiAnalysisTime > 10 * 60 * 1000) {
     cachedMarketSentiment = await getAiMarketSentiment({
@@ -173,10 +172,9 @@ async function checkTrends(solPriceUsd) {
     lastAiAnalysisTime = now;
   }
 
-  if (cachedMarketSentiment.shouldTrade === false) {
-    console.log("AI市場分析: 取引見送り → " + cachedMarketSentiment.reason);
-    return;
-  }
+  // AIがbearishでもテクニカルスコアが高ければ購入する
+  // AIは参考程度に使う
+  const aiPenalty = cachedMarketSentiment.sentiment === "bearish" ? -10 : 0;
 
   const results = [];
 
@@ -190,10 +188,11 @@ async function checkTrends(solPriceUsd) {
     }
 
     const analysis = analyzeToken(pair);
-    console.log(token.symbol + ": 5m " + analysis.priceChange5m.toFixed(2) + "% | スコア: " + analysis.score);
+    const totalScore = analysis.score + aiPenalty;
+    console.log(token.symbol + ": 5m " + analysis.priceChange5m.toFixed(2) + "% | スコア: " + totalScore);
 
-    if (analysis.score >= CONFIG.MIN_SCORE && analysis.priceChange5m >= CONFIG.MIN_PRICE_CHANGE_5M) {
-      results.push({ token, pair, analysis });
+    if (totalScore >= CONFIG.MIN_SCORE && analysis.priceChange5m >= CONFIG.MIN_PRICE_CHANGE_5M) {
+      results.push({ token, pair, analysis, totalScore });
     }
 
     await new Promise((r) => setTimeout(r, CONFIG.REQUEST_INTERVAL_MS));
@@ -204,20 +203,19 @@ async function checkTrends(solPriceUsd) {
     return;
   }
 
-  results.sort((a, b) => b.analysis.score - a.analysis.score);
+  results.sort((a, b) => b.totalScore - a.totalScore);
+  console.log("購入候補: " + results.length + "件");
 
   let selectedResult = null;
   for (const result of results) {
     console.log("流動性チェック中: " + result.token.symbol);
     const tradeResult = await buyToken(result.token.address, solPriceUsd, false);
     if (tradeResult) {
-      // symbolをtradeResultに追加
       tradeResult.symbol = result.token.symbol;
       addPosition(tradeResult);
       purchasedTokens.add(result.token.address);
       console.log("購入成功: " + result.token.symbol);
 
-      // 取引履歴に記録
       addTradeHistory({
         symbol: result.token.symbol,
         type: "buy",
