@@ -10,6 +10,7 @@ app.use(cors({
 }));
 
 app.use(express.json());
+app.options("*", cors());
 
 let tradeHistory = [];
 let botConfig = {
@@ -33,8 +34,6 @@ function addTradeHistory(trade) {
   });
   if (tradeHistory.length > 50) tradeHistory.pop();
 }
-
-app.options("*", cors());
 
 app.get("/health", (req, res) => {
   res.json({ status: "ok", timestamp: Date.now() });
@@ -63,6 +62,97 @@ app.post("/config", (req, res) => {
   if (active !== undefined) botConfig.active = active;
   console.log("設定変更:", JSON.stringify(botConfig));
   res.json({ success: true, config: botConfig });
+});
+
+// 手動購入エンドポイント
+app.post("/manual-buy", async (req, res) => {
+  try {
+    const { tokenAddress, symbol } = req.body;
+    if (!tokenAddress) {
+      return res.status(400).json({ success: false, error: "tokenAddressが必要です" });
+    }
+
+    const { getSolanaPrice } = require("./priceChecker");
+    const { buyToken } = require("./trader");
+    const { addPosition, positions } = require("./portfolio");
+
+    if (positions.length >= 1) {
+      return res.status(400).json({ success: false, error: "既にポジションがあります" });
+    }
+
+    const priceData = await getSolanaPrice();
+    if (!priceData) {
+      return res.status(500).json({ success: false, error: "SOL価格取得失敗" });
+    }
+
+    console.log("手動購入開始:", tokenAddress);
+    const tradeResult = await buyToken(tokenAddress, priceData.price, false);
+
+    if (!tradeResult) {
+      return res.status(500).json({ success: false, error: "購入失敗（ルートなしまたは残高不足）" });
+    }
+
+    tradeResult.symbol = symbol || tokenAddress.substring(0, 8);
+    addPosition(tradeResult);
+
+    addTradeHistory({
+      symbol: tradeResult.symbol,
+      type: "buy",
+      amount: tradeResult.buyAmountUsd,
+      profit: null,
+      reason: "手動購入",
+      txid: tradeResult.txid,
+    });
+
+    console.log("手動購入成功:", tradeResult.txid);
+    res.json({ success: true, txid: tradeResult.txid });
+
+  } catch (e) {
+    console.error("手動購入エラー:", e.message);
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// 手動売却エンドポイント
+app.post("/manual-sell", async (req, res) => {
+  try {
+    const { positions } = require("./portfolio");
+    const { sellToken } = require("./trader");
+
+    if (positions.length === 0) {
+      return res.status(400).json({ success: false, error: "ポジションがありません" });
+    }
+
+    const position = positions[0];
+    console.log("手動売却開始:", position.tokenMint);
+
+    const result = await sellToken(position, 0, "手動売却");
+
+    if (!result) {
+      return res.status(500).json({ success: false, error: "売却失敗（流動性不足の可能性）" });
+    }
+
+    addTradeHistory({
+      symbol: position.symbol || "不明",
+      type: "sell",
+      amount: position.buyAmountUsd,
+      profit: null,
+      reason: "手動売却",
+      txid: result.txid,
+    });
+
+    const { removePosition } = require("./portfolio");
+    // portfolio.jsのremovePositionを使う
+    const idx = positions.findIndex(p => p.tokenMint === position.tokenMint);
+    if (idx !== -1) positions.splice(idx, 1);
+
+    console.log("手動売却成功:", result.txid);
+    res.json({ success: true, txid: result.txid });
+
+  } catch (e) {
+    console.error("手動売却エラー:", e.message);
+    res.status(500).json({ success: false, error: e.message });
+  }
 });
 
 function startApi() {
