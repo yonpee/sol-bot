@@ -1,8 +1,14 @@
 const axios = require("axios");
 const {
   Connection, Keypair, VersionedTransaction,
-  LAMPORTS_PER_SOL,
+  PublicKey, Transaction, LAMPORTS_PER_SOL,
 } = require("@solana/web3.js");
+const {
+  getAssociatedTokenAddress,
+  createAssociatedTokenAccountInstruction,
+  TOKEN_PROGRAM_ID,
+  ASSOCIATED_TOKEN_PROGRAM_ID,
+} = require("@solana/spl-token");
 const bs58 = require("bs58");
 
 const TRADE_CONFIG = {
@@ -29,6 +35,40 @@ function getConnection() {
 
 async function usdToLamports(usdAmount, solPriceUsd) {
   return Math.floor((usdAmount / solPriceUsd) * LAMPORTS_PER_SOL);
+}
+
+async function ensureTokenAccount(connection, wallet, mintAddress) {
+  try {
+    const mint = new PublicKey(mintAddress);
+    const ata = await getAssociatedTokenAddress(
+      mint, wallet.publicKey, false,
+      TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID
+    );
+    const info = await connection.getAccountInfo(ata);
+    if (info) {
+      console.log("トークンアカウントOK");
+      return true;
+    }
+    console.log("トークンアカウント作成中...");
+    const ix = createAssociatedTokenAccountInstruction(
+      wallet.publicKey, ata, wallet.publicKey, mint,
+      TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID
+    );
+    const { blockhash, lastValidBlockHeight } =
+      await connection.getLatestBlockhash("confirmed");
+    const tx = new Transaction({ recentBlockhash: blockhash, feePayer: wallet.publicKey });
+    tx.add(ix);
+    tx.sign(wallet);
+    const sig = await connection.sendRawTransaction(tx.serialize(), {
+      skipPreflight: false,
+    });
+    await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight });
+    console.log("トークンアカウント作成完了!");
+    return true;
+  } catch (error) {
+    console.error("トークンアカウント作成エラー:", error.message);
+    return false;
+  }
 }
 
 async function checkRaydiumRoute(tokenMint, lamports) {
@@ -64,6 +104,9 @@ async function buyToken(tokenMint, solPriceUsd, isPumpFun = false) {
     const lamports = await usdToLamports(TRADE_CONFIG.BUY_AMOUNT_USD, solPriceUsd);
     console.log("買い金額: $" + TRADE_CONFIG.BUY_AMOUNT_USD + " = " + lamports + " lamports");
 
+    // 購入前にトークンアカウントを作成
+    await ensureTokenAccount(connection, wallet, tokenMint);
+
     const quote = await checkRaydiumRoute(tokenMint, lamports);
     if (!quote) {
       console.log("Raydiumルートなし → 購入スキップ");
@@ -98,17 +141,14 @@ async function buyToken(tokenMint, solPriceUsd, isPumpFun = false) {
       console.log("購入成功! TX:", txid);
     }
 
-    // buyPriceをSOL建てで正しく計算
     const outputAmount = parseFloat(quote?.data?.outputAmount || 1);
     const inputAmountSol = lamports / LAMPORTS_PER_SOL;
     const buyPriceInSol = inputAmountSol / outputAmount;
     const buyPriceUsd = buyPriceInSol * solPriceUsd;
-
     console.log("購入価格: $" + buyPriceUsd.toFixed(8) + " per token");
 
     return {
-      txid,
-      tokenMint,
+      txid, tokenMint,
       buyAmountUsd: TRADE_CONFIG.BUY_AMOUNT_USD,
       buyPrice: buyPriceUsd,
       tokenAmount: outputAmount,
@@ -126,6 +166,9 @@ async function sellToken(position, currentPrice, reason) {
   try {
     const wallet = getWallet();
     const connection = getConnection();
+
+    // 売却前にトークンアカウントを確認・作成
+    await ensureTokenAccount(connection, wallet, position.tokenMint);
 
     const quoteRes = await axios.get(TRADE_CONFIG.RAYDIUM_SWAP_API, {
       params: {
