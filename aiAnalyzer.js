@@ -9,25 +9,20 @@ async function analyzeWithClaude(tokenSymbol, marketData) {
   }
 
   try {
-    const now = new Date().toISOString();
-
     const prompt = `あなたは仮想通貨トレーダーのAIアシスタントです。
-以下の情報をもとに、${tokenSymbol}を今すぐ購入すべきか判断してください。
-
-現在時刻: ${now}
+以下のテクニカルデータをもとに、${tokenSymbol}を今すぐ購入すべきか判断してください。
 
 テクニカルデータ:
 - 5分変化: ${marketData.priceChange5m}%
 - 1時間変化: ${marketData.priceChange1h}%
 - 24時間変化: ${marketData.priceChange24h}%
 - テクニカルスコア: ${marketData.score}
-- 理由: ${marketData.reasons?.join(", ")}
+- シグナル: ${marketData.reasons?.join(", ")}
 
 以下の観点で分析してください:
-1. 現在の世界情勢とマクロ経済の影響
-2. 仮想通貨市場全体のトレンド
-3. Solanaエコシステムの状況
-4. ${tokenSymbol}の購入タイミングとして適切か
+1. テクニカル指標から見た買いシグナルの強さ
+2. トレンドの継続性
+3. リスクリワードの観点
 
 必ずJSON形式のみで回答（他テキスト不要）:
 {
@@ -67,22 +62,23 @@ async function analyzeWithClaude(tokenSymbol, marketData) {
   }
 }
 
-async function getAiMarketSentiment() {
+async function getAiMarketSentiment(marketData) {
   if (!ANTHROPIC_API_KEY) {
     return { score: 0, reason: "AI分析なし", sentiment: "neutral", shouldTrade: true };
   }
 
   try {
-    const now = new Date().toISOString();
+    const prompt = `あなたは仮想通貨市場のテクニカルアナリストです。
+以下のSOL市場データをもとに、今取引すべきか判断してください。
 
-    const prompt = `あなたは仮想通貨市場のアナリストです。
-現在時刻: ${now}
+SOL市場データ:
+- SOL 1時間変化: ${marketData?.solTrend || 0}%
+- 監視コインの平均スコア: ${marketData?.avgScore || 0}
 
-今この瞬間の以下について判断してください:
-1. 世界の株式市場・経済指標の状況
-2. 仮想通貨市場全体のセンチメント
-3. Solana（SOL）の市場環境
-4. 今は取引しやすい環境か
+以下の観点で判断してください:
+1. SOLのトレンド方向
+2. 市場全体の勢い
+3. 今は取引に適したタイミングか
 
 必ずJSON形式のみで回答（他テキスト不要）:
 {
