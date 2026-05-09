@@ -24,7 +24,6 @@ async function savePositionToEnv(position) {
   try {
     const value = position ? JSON.stringify(position) : "{}";
     process.env.CURRENT_POSITION = value;
-    console.log("ポジション保存:", position ? position.tokenMint.substring(0, 8) : "なし");
   } catch (error) {
     console.error("ポジション保存エラー:", error.message);
   }
@@ -74,7 +73,7 @@ function removePosition(tokenMint) {
   if (index !== -1) {
     positions.splice(index, 1);
     savePositionToEnv(null);
-    console.log(`ポジション削除完了`);
+    console.log("ポジション削除完了");
   }
 }
 
@@ -119,7 +118,7 @@ async function monitorPositions() {
 
   for (const position of [...positions]) {
     const holdingMinutes = (Date.now() - position.timestamp) / 1000 / 60;
-    console.log(`損益: ${((Date.now() - position.timestamp) / 1000 / 60).toFixed(1)}分`);
+    console.log(`保有時間: ${holdingMinutes.toFixed(1)}分`);
 
     // 30分強制売却
     if (holdingMinutes >= 30) {
@@ -141,7 +140,7 @@ async function monitorPositions() {
       ? ((currentPrice - position.buyPrice) / position.buyPrice) * 100
       : 0;
 
-    console.log(`損益: ${profitPercent.toFixed(2)}% | 保有: ${holdingMinutes.toFixed(1)}分`);
+    console.log(`損益: ${profitPercent.toFixed(2)}% | 価格: $${currentPrice.toFixed(8)}`);
 
     // 利確
     if (profitPercent >= TRADE_CONFIG.TAKE_PROFIT_PERCENT) {
@@ -152,11 +151,8 @@ async function monitorPositions() {
         removePosition(position.tokenMint);
       } else {
         position.retryCount = (position.retryCount || 0) + 1;
-        console.log(`売却失敗 → リトライ ${position.retryCount}/3`);
-        if (position.retryCount >= 3) {
-          console.log("3回失敗 → ポジション削除");
-          removePosition(position.tokenMint);
-        }
+        console.log(`売却失敗 リトライ${position.retryCount}/3`);
+        if (position.retryCount >= 3) removePosition(position.tokenMint);
       }
       continue;
     }
@@ -167,16 +163,13 @@ async function monitorPositions() {
       const result = await sellToken(position, currentPrice, "損切り");
       if (result) {
         await sendSellNotification(position, result, profitPercent);
-        removePosition(position.tokenMint);
       } else {
         position.retryCount = (position.retryCount || 0) + 1;
-        console.log(`売却失敗 → リトライ ${position.retryCount}/3`);
-        if (position.retryCount >= 3) {
-          console.log("3回失敗 → ポジション削除");
-          removePosition(position.tokenMint);
-        }
+        console.log(`売却失敗 リトライ${position.retryCount}/3`);
+        if (position.retryCount >= 3) removePosition(position.tokenMint);
+        return;
       }
-      continue;
+      removePosition(position.tokenMint);
     }
   }
 }
