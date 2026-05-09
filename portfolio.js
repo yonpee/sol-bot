@@ -4,6 +4,50 @@ const { addTradeHistory } = require("./api");
 
 const positions = [];
 
+async function savePositionToRailway(position) {
+  try {
+    const token = process.env.RAILWAY_TOKEN;
+    const serviceId = process.env.RAILWAY_SERVICE_ID;
+
+    if (!token || !serviceId) {
+      process.env.CURRENT_POSITION = position ? JSON.stringify(position) : "{}";
+      return;
+    }
+
+    const value = position ? JSON.stringify(position) : "{}";
+
+    await axios.post(
+      "https://backboard.railway.app/graphql/v2",
+      {
+        query: `
+          mutation UpsertVariable($input: VariableUpsertInput!) {
+            variableUpsert(input: $input)
+          }
+        `,
+        variables: {
+          input: {
+            serviceId: serviceId,
+            environmentId: process.env.RAILWAY_ENVIRONMENT_ID || "",
+            name: "CURRENT_POSITION",
+            value: value,
+          },
+        },
+      },
+      {
+        headers: {
+          Authorization: "Bearer " + token,
+          "Content-Type": "application/json",
+        },
+        timeout: 10000,
+      }
+    );
+    console.log("ポジションをRailwayに保存しました");
+  } catch (error) {
+    console.error("Railway保存エラー:", error.message);
+    process.env.CURRENT_POSITION = position ? JSON.stringify(position) : "{}";
+  }
+}
+
 function loadPositionFromEnv() {
   try {
     const saved = process.env.CURRENT_POSITION;
@@ -18,15 +62,6 @@ function loadPositionFromEnv() {
     }
   } catch (error) {
     console.error("ポジション復元エラー:", error.message);
-  }
-}
-
-async function savePositionToEnv(position) {
-  try {
-    const value = position ? JSON.stringify(position) : "{}";
-    process.env.CURRENT_POSITION = value;
-  } catch (error) {
-    console.error("ポジション保存エラー:", error.message);
   }
 }
 
@@ -63,18 +98,20 @@ function addPosition(tradeResult) {
     txid: tradeResult.txid,
     symbol: tradeResult.symbol || "不明",
     timestamp: tradeResult.timestamp,
+    takeProfit: tradeResult.takeProfit || TRADE_CONFIG.TAKE_PROFIT_PERCENT,
+    stopLoss: tradeResult.stopLoss || TRADE_CONFIG.STOP_LOSS_PERCENT,
     retryCount: 0,
   };
   positions.push(position);
-  savePositionToEnv(position);
-  console.log("ポジション追加: " + tradeResult.tokenMint.substring(0, 8) + "...");
+  savePositionToRailway(position);
+  console.log("ポジション追加: " + position.symbol);
 }
 
 function removePosition(tokenMint) {
   const index = positions.findIndex((p) => p.tokenMint === tokenMint);
   if (index !== -1) {
     positions.splice(index, 1);
-    savePositionToEnv(null);
+    savePositionToRailway(null);
     console.log("ポジション削除完了");
   }
 }
@@ -84,8 +121,7 @@ async function sendSellNotification(position, sellResult, profitPercent) {
   if (!webhookUrl) return;
 
   const isProfit = profitPercent >= 0;
-  const now = new Date();
-  const jstTime = now.toLocaleTimeString("ja-JP", { timeZone: "Asia/Tokyo" });
+  const jstTime = new Date().toLocaleTimeString("ja-JP", { timeZone: "Asia/Tokyo" });
 
   try {
     await axios.post(webhookUrl, {
@@ -120,6 +156,10 @@ async function monitorPositions() {
     const holdingMinutes = (Date.now() - position.timestamp) / 1000 / 60;
     console.log("保有時間: " + holdingMinutes.toFixed(1) + "分");
 
+    // ポジションごとの利確・損切りライン
+    const takeProfitLine = position.takeProfit || TRADE_CONFIG.TAKE_PROFIT_PERCENT;
+    const stopLossLine = position.stopLoss || TRADE_CONFIG.STOP_LOSS_PERCENT;
+
     // 30分強制売却
     if (holdingMinutes >= 30) {
       console.log("30分経過 → 強制売却");
@@ -150,10 +190,10 @@ async function monitorPositions() {
       ? ((currentPrice - position.buyPrice) / position.buyPrice) * 100
       : 0;
 
-    console.log("損益: " + profitPercent.toFixed(2) + "% | 価格: $" + currentPrice.toFixed(8));
+    console.log("損益: " + profitPercent.toFixed(2) + "% | 利確: +" + takeProfitLine + "% | 損切り: " + stopLossLine + "%");
 
     // 利確
-    if (profitPercent >= TRADE_CONFIG.TAKE_PROFIT_PERCENT) {
+    if (profitPercent >= takeProfitLine) {
       console.log("利確! +" + profitPercent.toFixed(2) + "%");
       const result = await sellToken(position, currentPrice, "利確");
       if (result) {
@@ -177,7 +217,7 @@ async function monitorPositions() {
     }
 
     // 損切り
-    if (profitPercent <= TRADE_CONFIG.STOP_LOSS_PERCENT) {
+    if (profitPercent <= stopLossLine) {
       console.log("損切り! " + profitPercent.toFixed(2) + "%");
       const result = await sellToken(position, currentPrice, "損切り");
       if (result) {
@@ -202,4 +242,4 @@ async function monitorPositions() {
   }
 }
 
-module.exports = { addPosition, monitorPositions, positions, loadPositionFromEnv };
+module.exports = { addPosition, removePosition, monitorPositions, positions, loadPositionFromEnv };
