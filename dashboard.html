@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>⚡ SOL Bot Dashboard</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #080c14;
+      color: #e2e8f0;
+      font-family: 'DM Mono', 'Courier New', monospace;
+      padding-bottom: 80px;
+    }
+    .header {
+      background: linear-gradient(180deg, #0d1421 0%, #080c14 100%);
+      border-bottom: 1px solid #1a2540;
+      padding: 16px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .logo { font-size: 16px; font-weight: 700; color: #38bdf8; letter-spacing: 0.1em; text-transform: uppercase; }
+    .status-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      display: inline-block; margin-right: 6px;
+    }
+    .status-text { font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; }
+    .tabs {
+      display: flex;
+      background: #0d1421;
+      border-bottom: 1px solid #1a2540;
+      position: sticky;
+      top: 57px;
+      z-index: 99;
+    }
+    .tab {
+      flex: 1; padding: 12px; text-align: center;
+      font-size: 11px; font-weight: 700; letter-spacing: 0.1em;
+      text-transform: uppercase; cursor: pointer;
+      color: #475569; border-bottom: 2px solid transparent;
+      background: none; border-top: none; border-left: none; border-right: none;
+      font-family: inherit;
+    }
+    .tab.active { color: #38bdf8; border-bottom: 2px solid #38bdf8; }
+    .section { padding: 16px 20px 0; }
+    .section-title {
+      font-size: 10px; color: #475569;
+      text-transform: uppercase; letter-spacing: 0.15em; margin-bottom: 12px;
+    }
+    .card {
+      background: #0d1421; border: 1px solid #1a2540;
+      border-radius: 12px; padding: 16px; margin-bottom: 12px;
+    }
+    .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+    .stat-card {
+      background: #0d1421; border-radius: 12px;
+      padding: 14px; text-align: center;
+    }
+    .stat-value { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; }
+    .stat-label { font-size: 10px; color: #475569; text-transform: uppercase; letter-spacing: 0.1em; margin-top: 4px; }
+    .setting-row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 12px 0; border-bottom: 1px solid #1a2540;
+    }
+    .setting-label { font-size: 13px; color: #94a3b8; }
+    .setting-value { font-size: 13px; font-weight: 700; color: #38bdf8; }
+    .progress-bar { background: #1a2540; border-radius: 4px; height: 8px; overflow: hidden; }
+    .progress-fill {
+      background: linear-gradient(90deg, #1d4ed8, #38bdf8);
+      height: 100%; border-radius: 4px; transition: width 0.5s ease;
+    }
+    .btn {
+      background: #1d4ed8; border: none; border-radius: 10px;
+      color: #fff; font-size: 13px; font-weight: 700;
+      padding: 12px 20px; cursor: pointer; width: 100%;
+      letter-spacing: 0.05em; margin-top: 8px; font-family: inherit;
+    }
+    .btn-danger { background: #7f1d1d; color: #ef4444; border: 1px solid #ef4444; }
+    .btn-success { background: #166534; color: #22c55e; border: 1px solid #22c55e; }
+    .refresh-btn {
+      background: none; border: 1px solid #1a2540; border-radius: 8px;
+      color: #475569; font-size: 11px; padding: 6px 12px;
+      cursor: pointer; font-family: inherit;
+    }
+    .error-box {
+      background: #1a0a0a; border: 1px solid #7f1d1d;
+      border-radius: 8px; padding: 12px; color: #ef4444;
+      font-size: 12px; margin-bottom: 12px;
+    }
+    .success-box {
+      background: #0a1a0a; border: 1px solid #166534;
+      border-radius: 8px; padding: 12px; color: #22c55e;
+      font-size: 12px; margin-bottom: 12px;
+    }
+    .history-row {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 10px 0; border-bottom: 1px solid #1a2540;
+    }
+    .badge {
+      font-size: 10px; padding: 2px 6px; border-radius: 4px; font-weight: 700;
+    }
+    input[type=number] {
+      background: #1a2540; border: 1px solid #2d3f60; border-radius: 8px;
+      color: #e2e8f0; font-size: 14px; padding: 8px 12px;
+      width: 80px; text-align: right; outline: none; font-family: inherit;
+    }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    a { color: #38bdf8; text-decoration: none; }
+    .pos-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .pos-item { background: #1a2540; border-radius: 8px; padding: 10px; }
+    .pos-item-label { font-size: 10px; color: #475569; }
+    .pos-item-value { font-size: 13px; font-weight: 700; color: #38bdf8; margin-top: 4px; }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <div class="logo">⚡ SOL Bot</div>
+  <div style="display:flex;align-items:center;gap:12px">
+    <span>
+      <span class="status-dot" id="statusDot" style="background:#64748b"></span>
+      <span class="status-text" id="statusText" style="color:#64748b">接続中...</span>
+    </span>
+    <button class="refresh-btn" onclick="fetchAll()">🔄</button>
+  </div>
+</div>
+
+<div class="tabs">
+  <button class="tab active" onclick="switchTab('dashboard')">📊 概要</button>
+  <button class="tab" onclick="switchTab('position')">📈 ポジ</button>
+  <button class="tab" onclick="switchTab('settings')">⚙️ 設定</button>
+  <button class="tab" onclick="switchTab('history')">📋 履歴</button>
+</div>
+
+<div id="errorBox" style="padding:12px 20px 0;display:none">
+  <div class="error-box" id="errorMsg"></div>
+</div>
+
+<!-- Dashboard Tab -->
+<div id="tab-dashboard" class="tab-content active">
+  <div class="section">
+    <div class="section-title">損益サマリー</div>
+    <div class="stat-grid">
+      <div class="stat-card" id="profitCard" style="border:1px solid #1a2540">
+        <div class="stat-value" id="totalProfit" style="color:#e2e8f0">$0.00</div>
+        <div class="stat-label">累計損益</div>
+      </div>
+      <div class="stat-card" style="border:1px solid #1a2540">
+        <div class="stat-value" id="winRate" style="color:#e2e8f0">0%</div>
+        <div class="stat-label">勝率</div>
+      </div>
+      <div class="stat-card" style="border:1px solid #1a2540">
+        <div class="stat-value" id="totalTrades" style="color:#e2e8f0">0</div>
+        <div class="stat-label">総取引回数</div>
+      </div>
+      <div class="stat-card" style="border:1px solid #1a2540">
+        <div class="stat-value" id="balance" style="color:#e2e8f0">$30.00</div>
+        <div class="stat-label">残高（推定）</div>
+      </div>
+    </div>
+
+    <div class="section-title">目標達成度 $30→$40</div>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;margin-bottom:8px">
+        <span style="font-size:12px;color:#64748b">進捗</span>
+        <span style="font-size:12px;color:#38bdf8;font-weight:700" id="progressPct">0%</span>
+      </div>
+      <div class="progress-bar">
+        <div class="progress-fill" id="progressFill" style="width:0%"></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-top:6px">
+        <span style="font-size:10px;color:#475569" id="progressCurrent">現在: $30.00</span>
+        <span style="font-size:10px;color:#475569">目標: $40.00</span>
+      </div>
+    </div>
+
+    <div class="section-title">Bot設定（現在値）</div>
+    <div class="card">
+      <div class="setting-row">
+        <span class="setting-label">利確ライン</span>
+        <span class="setting-value" id="cfgTakeProfit">+8%</span>
+      </div>
+      <div class="setting-row">
+        <span class="setting-label">損切りライン</span>
+        <span class="setting-value" id="cfgStopLoss">-4%</span>
+      </div>
+      <div class="setting-row">
+        <span class="setting-label">購入金額</span>
+        <span class="setting-value" id="cfgBuyAmount">$10</span>
+      </div>
+      <div class="setting-row" style="border:none">
+        <span class="setting-label">購入条件</span>
+        <span class="setting-value" id="cfgMinChange">5分で+1%以上</span>
+      </div>
+    </div>
+
+    <button class="btn" id="toggleBtn" onclick="toggleBot()">⏸ Bot を停止する</button>
+  </div>
+</div>
+
+<!-- Position Tab -->
+<div id="tab-position" class="tab-content">
+  <div class="section">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <div class="section-title" id="positionTitle">現在のポジション (0件)</div>
+      <button class="refresh-btn" onclick="fetchStatus()">🔄</button>
+    </div>
+    <div id="positionContent">
+      <div class="card">
+        <div style="text-align:center;color:#475569;font-size:13px;padding:20px">
+          現在ポジションなし
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Settings Tab -->
+<div id="tab-settings" class="tab-content">
+  <div class="section">
+    <div class="section-title">売買設定</div>
+    <div id="saveMsg" style="display:none" class="success-box">✅ Botに反映しました！</div>
+    <div class="card">
+      <div class="setting-row">
+        <span class="setting-label">利確ライン (%)</span>
+        <input type="number" id="inputTakeProfit" value="8" step="0.5">
+      </div>
+      <div class="setting-row">
+        <span class="setting-label">損切りライン (%)</span>
+        <input type="number" id="inputStopLoss" value="-4" step="0.5">
+      </div>
+      <div class="setting-row">
+        <span class="setting-label">購入金額 ($)</span>
+        <input type="number" id="inputBuyAmount" value="10" step="1">
+      </div>
+      <div class="setting-row" style="border:none">
+        <span class="setting-label">購入条件 5分変化 (%)</span>
+        <input type="number" id="inputMinChange" value="1" step="0.5">
+      </div>
+    </div>
+    <p style="font-size:11px;color:#475569;margin-bottom:12px;line-height:1.6">
+      ⚠️ 保存するとBotに即時反映されます。
+    </p>
+    <button class="btn" onclick="saveConfig()">💾 Botに反映する</button>
+
+    <div class="section-title" style="margin-top:20px">リスク管理</div>
+    <div class="card">
+      <div class="setting-row">
+        <span class="setting-label">リスクリワード比</span>
+        <span class="setting-value" id="riskReward">1:2.0</span>
+      </div>
+      <div class="setting-row">
+        <span class="setting-label">必要勝率</span>
+        <span class="setting-value" id="reqWinRate">34%以上</span>
+      </div>
+      <div class="setting-row">
+        <span class="setting-label">1回の最大損失</span>
+        <span class="setting-value" id="maxLoss">$0.40</span>
+      </div>
+      <div class="setting-row" style="border:none">
+        <span class="setting-label">1回の利益目標</span>
+        <span class="setting-value" id="profitTarget">$0.80</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- History Tab -->
+<div id="tab-history" class="tab-content">
+  <div class="section">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <div class="section-title">取引履歴</div>
+      <button class="refresh-btn" onclick="fetchHistory()">🔄 更新</button>
+    </div>
+    <div class="card" id="historyContent">
+      <div style="text-align:center;color:#475569;font-size:13px;padding:20px">
+        取引履歴なし
+      </div>
+    </div>
+    <div id="historySummary" style="display:none">
+      <div class="section-title">サマリー</div>
+      <div class="card" id="summaryContent"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const API_BASE = "https://sol-bot-production-5176.up.railway.app";
+let botActive = true;
+let historyData = [];
+
+function switchTab(name) {
+  document.querySelectorAll(".tab-content").forEach(el => el.classList.remove("active"));
+  document.querySelectorAll(".tab").forEach(el => el.classList.remove("active"));
+  document.getElementById("tab-" + name).classList.add("active");
+  event.target.classList.add("active");
+}
+
+function showError(msg) {
+  document.getElementById("errorBox").style.display = "block";
+  document.getElementById("errorMsg").textContent = "⚠️ " + msg;
+}
+
+function hideError() {
+  document.getElementById("errorBox").style.display = "none";
+}
+
+function setStatus(connected, active) {
+  const dot = document.getElementById("statusDot");
+  const text = document.getElementById("statusText");
+  if (!connected) {
+    dot.style.background = "#64748b";
+    dot.style.boxShadow = "none";
+    text.style.color = "#64748b";
+    text.textContent = "未接続";
+  } else if (active) {
+    dot.style.background = "#22c55e";
+    dot.style.boxShadow = "0 0 8px #22c55e";
+    text.style.color = "#22c55e";
+    text.textContent = "稼働中";
+  } else {
+    dot.style.background = "#ef4444";
+    dot.style.boxShadow = "none";
+    text.style.color = "#ef4444";
+    text.textContent = "停止中";
+  }
+}
+
+async function fetchStatus() {
+  try {
+    const res = await fetch(API_BASE + "/status");
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const data = await res.json();
+    hideError();
+    botActive = data.active !== false;
+    setStatus(true, botActive);
+
+    // 設定を更新
+    const cfg = data.config || {};
+    document.getElementById("cfgTakeProfit").textContent = "+" + (cfg.takeProfit || 8) + "%";
+    document.getElementById("cfgStopLoss").textContent = (cfg.stopLoss || -4) + "%";
+    document.getElementById("cfgBuyAmount").textContent = "$" + (cfg.buyAmount || 10);
+    document.getElementById("cfgMinChange").textContent = "5分で+" + (cfg.minChange5m || 1) + "%以上";
+
+    document.getElementById("inputTakeProfit").value = cfg.takeProfit || 8;
+    document.getElementById("inputStopLoss").value = cfg.stopLoss || -4;
+    document.getElementById("inputBuyAmount").value = cfg.buyAmount || 10;
+    document.getElementById("inputMinChange").value = cfg.minChange5m || 1;
+
+    updateRiskCalc();
+
+    // Botボタン
+    const btn = document.getElementById("toggleBtn");
+    if (botActive) {
+      btn.textContent = "⏸ Bot を停止する";
+      btn.className = "btn btn-danger";
+    } else {
+      btn.textContent = "▶ Bot を起動する";
+      btn.className = "btn btn-success";
+    }
+
+    // ポジション
+    const positions = data.positions || [];
+    document.getElementById("positionTitle").textContent = "現在のポジション (" + positions.length + "件)";
+    if (positions.length > 0) {
+      let html = "";
+      positions.forEach(pos => {
+        const mins = Math.round((Date.now() - pos.timestamp) / 1000 / 60);
+        html += '<div class="card" style="border:1px solid #1d4ed8">';
+        html += '<div style="font-size:11px;color:#64748b;margin-bottom:8px">' + (pos.tokenMint || "").substring(0, 20) + "...</div>";
+        html += '<div class="pos-grid">';
+        html += '<div class="pos-item"><div class="pos-item-label">購入金額</div><div class="pos-item-value">$' + (pos.buyAmountUsd || 0) + "</div></div>";
+        html += '<div class="pos-item"><div class="pos-item-label">保有時間</div><div class="pos-item-value">' + mins + "分</div></div>";
+        html += '<div class="pos-item"><div class="pos-item-label">購入価格</div><div class="pos-item-value">' + (pos.buyPrice > 0 ? "$" + pos.buyPrice.toFixed(8) : "取得中") + "</div></div>";
+        html += '<div class="pos-item"><div class="pos-item-label">保有数量</div><div class="pos-item-value">' + (pos.tokenAmount ? pos.tokenAmount.toLocaleString() : "取得中") + "</div></div>";
+        html += "</div>";
+        if (pos.txid) {
+          html += '<div style="margin-top:12px"><a href="https://solscan.io/tx/' + pos.txid + '" target="_blank">🔗 購入TXを確認</a></div>';
+        }
+        html += "</div>";
+      });
+      document.getElementById("positionContent").innerHTML = html;
+    } else {
+      document.getElementById("positionContent").innerHTML = '<div class="card"><div style="text-align:center;color:#475569;font-size:13px;padding:20px">現在ポジションなし</div></div>';
+    }
+
+  } catch (e) {
+    setStatus(false, false);
+    showError("Bot APIに接続できません: " + e.message);
+  }
+}
+
+async function fetchHistory() {
+  try {
+    const res = await fetch(API_BASE + "/history");
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const data = await res.json();
+    historyData = data.history || [];
+    updateHistoryUI();
+    updateStats();
+  } catch (e) {
+    console.error("履歴取得エラー:", e.message);
+  }
+}
+
+function updateHistoryUI() {
+  const content = document.getElementById("historyContent");
+  if (historyData.length === 0) {
+    content.innerHTML = '<div style="text-align:center;color:#475569;font-size:13px;padding:20px">取引履歴なし</div>';
+    return;
+  }
+  let html = "";
+  historyData.forEach(h => {
+    const isBuy = h.type === "buy";
+    const isProfit = h.profit > 0;
+    const badgeBg = isBuy ? "#1e3a5f" : (isProfit ? "#166534" : "#7f1d1d");
+    const badgeColor = isBuy ? "#38bdf8" : (isProfit ? "#22c55e" : "#ef4444");
+    html += '<div class="history-row">';
+    html += '<div>';
+    html += '<div style="display:flex;align-items:center;gap:8px">';
+    html += '<span class="badge" style="background:' + badgeBg + ';color:' + badgeColor + '">' + (isBuy ? "買" : "売") + "</span>";
+    html += '<span style="font-size:14px;font-weight:700">' + (h.symbol || "不明") + "</span>";
+    html += '<span style="font-size:10px;color:#475569">' + (h.timestamp || "") + "</span>";
+    html += "</div>";
+    html += '<div style="font-size:11px;color:#475569;margin-top:4px">' + (h.reason || "") + "</div>";
+    if (h.txid) {
+      html += '<a href="https://solscan.io/tx/' + h.txid + '" target="_blank" style="font-size:10px">TX確認</a>';
+    }
+    html += "</div>";
+    html += '<div style="text-align:right">';
+    if (h.profit !== null && h.profit !== undefined) {
+      const color = h.profit >= 0 ? "#22c55e" : "#ef4444";
+      html += '<div style="font-size:15px;font-weight:700;color:' + color + '">' + (h.profit >= 0 ? "+" : "") + "$" + h.profit.toFixed(2) + "</div>";
+    } else {
+      html += '<div style="font-size:11px;color:#38bdf8">保有中</div>';
+    }
+    html += '<div style="font-size:10px;color:#475569">$' + (h.amount || 0) + "</div>";
+    html += "</div></div>";
+  });
+  content.innerHTML = html;
+}
+
+function updateStats() {
+  const trades = historyData.filter(h => h.profit !== null && h.profit !== undefined);
+  const totalProfit = trades.reduce((sum, h) => sum + (h.profit || 0), 0);
+  const winTrades = trades.filter(h => h.profit > 0).length;
+  const winRate = trades.length > 0 ? Math.round((winTrades / trades.length) * 100) : 0;
+
+  const profitColor = totalProfit >= 0 ? "#22c55e" : "#ef4444";
+  document.getElementById("totalProfit").textContent = (totalProfit >= 0 ? "+" : "") + "$" + totalProfit.toFixed(2);
+  document.getElementById("totalProfit").style.color = profitColor;
+  document.getElementById("profitCard").style.border = "1px solid " + (totalProfit >= 0 ? "#166534" : "#7f1d1d");
+  document.getElementById("winRate").textContent = winRate + "%";
+  document.getElementById("totalTrades").textContent = trades.length;
+  document.getElementById("balance").textContent = "$" + (30 + totalProfit).toFixed(2);
+
+  const pct = Math.min(Math.max((totalProfit / 10) * 100, 0), 100);
+  document.getElementById("progressPct").textContent = Math.round((totalProfit / 10) * 100) + "%";
+  document.getElementById("progressFill").style.width = pct + "%";
+  document.getElementById("progressCurrent").textContent = "現在: $" + (30 + totalProfit).toFixed(2);
+
+  if (trades.length > 0) {
+    document.getElementById("historySummary").style.display = "block";
+    document.getElementById("summaryContent").innerHTML =
+      '<div class="setting-row"><span class="setting-label">総取引回数</span><span class="setting-value">' + trades.length + '回</span></div>' +
+      '<div class="setting-row"><span class="setting-label">勝ち</span><span class="setting-value">' + winTrades + '回</span></div>' +
+      '<div class="setting-row"><span class="setting-label">負け</span><span class="setting-value">' + (trades.length - winTrades) + '回</span></div>' +
+      '<div class="setting-row"><span class="setting-label">勝率</span><span class="setting-value">' + winRate + '%</span></div>' +
+      '<div class="setting-row" style="border:none"><span class="setting-label">累計損益</span><span class="setting-value" style="color:' + profitColor + '">' + (totalProfit >= 0 ? "+" : "") + "$" + totalProfit.toFixed(2) + '</span></div>';
+  }
+}
+
+function updateRiskCalc() {
+  const tp = parseFloat(document.getElementById("inputTakeProfit").value) || 8;
+  const sl = Math.abs(parseFloat(document.getElementById("inputStopLoss").value) || 4);
+  const amt = parseFloat(document.getElementById("inputBuyAmount").value) || 10;
+  document.getElementById("riskReward").textContent = "1:" + (tp / sl).toFixed(1);
+  document.getElementById("reqWinRate").textContent = Math.round(sl / (tp + sl) * 100) + "%以上";
+  document.getElementById("maxLoss").textContent = "$" + (amt * sl / 100).toFixed(2);
+  document.getElementById("profitTarget").textContent = "$" + (amt * tp / 100).toFixed(2);
+}
+
+async function saveConfig() {
+  const config = {
+    takeProfit: parseFloat(document.getElementById("inputTakeProfit").value),
+    stopLoss: parseFloat(document.getElementById("inputStopLoss").value),
+    buyAmount: parseFloat(document.getElementById("inputBuyAmount").value),
+    minChange5m: parseFloat(document.getElementById("inputMinChange").value),
+  };
+  try {
+    const res = await fetch(API_BASE + "/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(config),
+    });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const saveMsg = document.getElementById("saveMsg");
+    saveMsg.style.display = "block";
+    setTimeout(() => saveMsg.style.display = "none", 3000);
+    updateRiskCalc();
+    await fetchStatus();
+  } catch (e) {
+    showError("設定保存失敗: " + e.message);
+  }
+}
+
+async function toggleBot() {
+  try {
+    const res = await fetch(API_BASE + "/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ active: !botActive }),
+    });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    await fetchStatus();
+  } catch (e) {
+    showError("切り替え失敗: " + e.message);
+  }
+}
+
+async function fetchAll() {
+  await Promise.all([fetchStatus(), fetchHistory()]);
+}
+
+// 入力変更時にリスク計算を更新
+["inputTakeProfit", "inputStopLoss", "inputBuyAmount", "inputMinChange"].forEach(id => {
+  document.getElementById(id).addEventListener("input", updateRiskCalc);
+});
+
+// 初回ロード
+fetchAll();
+
+// 30秒ごとに自動更新
+setInterval(fetchAll, 30000);
+</script>
+</body>
+</html>
