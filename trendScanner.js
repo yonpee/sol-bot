@@ -45,7 +45,7 @@ async function getSolTrend() {
       parseFloat(b.liquidity?.usd || 0) > parseFloat(a.liquidity?.usd || 0) ? b : a
     );
     solTrend = parseFloat(best.priceChange?.h1 || 0);
-    console.log(`SOLトレンド(1h): ${solTrend.toFixed(2)}%`);
+    console.log("SOLトレンド(1h):", solTrend.toFixed(2) + "%");
     return solTrend;
   } catch (error) {
     return 0;
@@ -65,19 +65,19 @@ function analyzeToken(pair) {
   let score = 0;
   let reasons = [];
 
-  if (priceChange5m >= 1) { score += 30; reasons.push(`5分+${priceChange5m.toFixed(1)}%`); }
-  if (priceChange1h > 0) { score += 20; reasons.push(`1時間プラス`); }
+  if (priceChange5m >= 1) { score += 30; reasons.push("5m+" + priceChange5m.toFixed(1) + "%"); }
+  if (priceChange1h > 0) { score += 20; reasons.push("1時間プラス"); }
   else { score -= 10; }
-  if (priceChange24h > 0) { score += 10; reasons.push(`24時間上昇`); }
+  if (priceChange24h > 0) { score += 10; reasons.push("24時間上昇"); }
 
   const volumeRatio = volume6h > 0 ? (volume24h / 4) / volume6h : 1;
-  if (volumeRatio > 1.2) { score += 20; reasons.push(`出来高${volumeRatio.toFixed(1)}倍増`); }
+  if (volumeRatio > 1.2) { score += 20; reasons.push("出来高" + volumeRatio.toFixed(1) + "倍増"); }
 
   const txRatio = txns1h > 0 ? (txns5m * 12) / txns1h : 1;
-  if (txRatio > 1.5) { score += 15; reasons.push(`取引${txRatio.toFixed(1)}倍増`); }
+  if (txRatio > 1.5) { score += 15; reasons.push("取引" + txRatio.toFixed(1) + "倍増"); }
 
-  if (solTrend < -2) { score -= 20; reasons.push(`SOL下落注意`); }
-  if (liquidity < 100000) { score -= 30; reasons.push(`流動性低`); }
+  if (solTrend < -2) { score -= 20; reasons.push("SOL下落注意"); }
+  if (liquidity < 100000) { score -= 30; reasons.push("流動性低"); }
 
   return { score, reasons, priceChange5m, priceChange1h, priceChange24h };
 }
@@ -88,11 +88,11 @@ async function getTokenPrice(tokenAddress) {
       const waitRemain = Math.ceil(
         (CONFIG.RATE_LIMIT_WAIT_MS - (Date.now() - lastRateLimitTime)) / 1000
       );
-      console.log(`レート制限待機中... あと${waitRemain}秒`);
+      console.log("レート制限待機中... あと" + waitRemain + "秒");
       return null;
     }
     const response = await axios.get(
-      `https://api.dexscreener.com/latest/dex/tokens/${tokenAddress}`,
+      "https://api.dexscreener.com/latest/dex/tokens/" + tokenAddress,
       { timeout: 10000 }
     );
     const data = response.data;
@@ -116,4 +116,135 @@ async function sendBuyNotification(symbol, analysis, aiResult, txid, dexLink) {
   const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
   if (!webhookUrl) return;
 
-  const jstTime​​​​​​​​​​​​​​​​
+  const now = new Date();
+  const jstTime = now.toLocaleTimeString("ja-JP", { timeZone: "Asia/Tokyo" });
+  const sentimentEmoji = aiResult.sentiment === "bullish" ? "🟢"
+    : aiResult.sentiment === "bearish" ? "🔴" : "🟡";
+
+  try {
+    await axios.post(webhookUrl, {
+      content: "🤖 **AI判断で自動購入！**",
+      embeds: [{
+        title: symbol + " 購入 (スコア: " + (analysis.score + (aiResult.score || 0)) + ")",
+        color: 0x00ff00,
+        fields: [
+          { name: "📈 5分変化", value: "+" + analysis.priceChange5m.toFixed(2) + "%", inline: true },
+          { name: "📊 1時間変化", value: analysis.priceChange1h.toFixed(2) + "%", inline: true },
+          { name: "📉 24時間変化", value: analysis.priceChange24h.toFixed(2) + "%", inline: true },
+          { name: "💵 金額", value: "$10相当のSOL", inline: true },
+          { name: "🎯 利確", value: "+8%", inline: true },
+          { name: "🔴 損切り", value: "-4%", inline: true },
+          { name: "📊 テクニカル理由", value: analysis.reasons.join("\n") || "なし", inline: false },
+          { name: sentimentEmoji + " AI判断", value: aiResult.sentiment + " | " + (aiResult.reason || "分析完了"), inline: false },
+          { name: "🌍 市場環境", value: cachedMarketSentiment.reason || "不明", inline: false },
+          { name: "🔗 TX", value: "[確認](https://solscan.io/tx/" + txid + ")", inline: false },
+          { name: "🔗 Chart", value: "[DexScreener](" + dexLink + ")", inline: false },
+        ],
+        footer: { text: "SOL: " + solTrend.toFixed(2) + "% | " + jstTime },
+      }],
+    }, { headers: { "Content-Type": "application/json" }, timeout: 10000 });
+  } catch (error) {
+    console.error("購入通知エラー:", error.message);
+  }
+}
+
+async function checkTrends(solPriceUsd) {
+  console.log("コイン監視中...");
+
+  if (positions.length >= CONFIG.MAX_POSITIONS) {
+    console.log("最大ポジション数に達しています");
+    return;
+  }
+
+  await getSolTrend();
+
+  if (solTrend < -3) {
+    console.log("SOL下落中(" + solTrend.toFixed(2) + "%) → 購入見送り");
+    return;
+  }
+
+  const now = Date.now();
+  if (now - lastAiAnalysisTime > 10 * 60 * 1000) {
+    cachedMarketSentiment = await getAiMarketSentiment({
+      solTrend: solTrend,
+      avgScore: 0,
+    });
+    lastAiAnalysisTime = now;
+  }
+
+  if (cachedMarketSentiment.shouldTrade === false) {
+    console.log("AI市場分析: 取引見送り → " + cachedMarketSentiment.reason);
+    return;
+  }
+
+  const results = [];
+
+  for (const token of WATCH_TOKENS) {
+    if (purchasedTokens.has(token.address)) continue;
+
+    const pair = await getTokenPrice(token.address);
+    if (!pair) {
+      await new Promise((r) => setTimeout(r, CONFIG.REQUEST_INTERVAL_MS));
+      continue;
+    }
+
+    const analysis = analyzeToken(pair);
+    console.log(token.symbol + ": 5m " + analysis.priceChange5m.toFixed(2) + "% | スコア: " + analysis.score);
+
+    if (analysis.score >= CONFIG.MIN_SCORE && analysis.priceChange5m >= CONFIG.MIN_PRICE_CHANGE_5M) {
+      results.push({ token, pair, analysis });
+    }
+
+    await new Promise((r) => setTimeout(r, CONFIG.REQUEST_INTERVAL_MS));
+  }
+
+  if (results.length === 0) {
+    console.log("購入条件なし");
+    return;
+  }
+
+  results.sort((a, b) => b.analysis.score - a.analysis.score);
+
+  let selectedResult = null;
+  for (const result of results) {
+    console.log("流動性チェック中: " + result.token.symbol);
+    const tradeResult = await buyToken(result.token.address, solPriceUsd, false);
+    if (tradeResult) {
+      addPosition(tradeResult);
+      purchasedTokens.add(result.token.address);
+      console.log("購入成功: " + result.token.symbol);
+      selectedResult = { result, tradeResult };
+      break;
+    } else {
+      console.log(result.token.symbol + ": ルートなし → 次の候補へ");
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+
+  if (!selectedResult) {
+    console.log("全候補の購入失敗");
+    return;
+  }
+
+  const aiResult = await analyzeWithClaude(
+    selectedResult.result.token.symbol,
+    {
+      priceChange5m: selectedResult.result.analysis.priceChange5m,
+      priceChange1h: selectedResult.result.analysis.priceChange1h,
+      priceChange24h: selectedResult.result.analysis.priceChange24h,
+      score: selectedResult.result.analysis.score,
+      reasons: selectedResult.result.analysis.reasons,
+    }
+  );
+
+  const dexLink = "https://dexscreener.com/" + selectedResult.result.pair.chainId + "/" + selectedResult.result.pair.pairAddress;
+  await sendBuyNotification(
+    selectedResult.result.token.symbol,
+    selectedResult.result.analysis,
+    aiResult,
+    selectedResult.tradeResult.txid,
+    dexLink
+  );
+}
+
+module.exports = { checkTrends };
