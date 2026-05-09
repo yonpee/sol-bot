@@ -1,146 +1,177 @@
 const axios = require("axios");
-const { buyToken } = require("./trader");
-const { addPosition, positions } = require("./portfolio");
+const {
+  Connection, Keypair, VersionedTransaction,
+  LAMPORTS_PER_SOL,
+} = require("@solana/web3.js");
+const { getAssociatedTokenAddress, getAccount } = require("@solana/spl-token");
+const { PublicKey } = require("@solana/web3.js");
+const bs58 = require("bs58");
 
-const WATCH_TOKENS = [
-  { symbol: "JUP", address: "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN" },
-  { symbol: "BONK", address: "DezXAZ8z7PnrnRJjz3wXBoRgiqCmbVeDbroIkLbCk5" },
-  { symbol: "WIF", address: "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm" },
-  { symbol: "POPCAT", address: "7GCihgDB8fe6KNjn2MYtkzZcRjQy3t9GHdC8uHYmW2hr" },
-  { symbol: "GOAT", address: "CzLSujWBLFsSjncfkh59rUFqvafWcY5tzedWJSuypump" },
-  { symbol: "AI16Z", address: "HeLp6NuQkmYB4pYWo2zYs22mESHXPQYzXbB8n4V98jwC" },
-  { symbol: "MEW", address: "MEW1gQWJ3nEXg2qgERiKu7FAFj79PHvQVREQUzScPP5" },
-  { symbol: "RAY", address: "4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R" },
-  { symbol: "PYTH", address: "HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3" },
-];
-
-const CONFIG = {
-  MIN_PRICE_CHANGE_5M: 0.5,
-  MAX_POSITIONS: 1,
-  REQUEST_INTERVAL_MS: 500,
-  RATE_LIMIT_WAIT_MS: 60000,
+const TRADE_CONFIG = {
+  BUY_AMOUNT_USD: 10,
+  TAKE_PROFIT_PERCENT: 3,
+  STOP_LOSS_PERCENT: -3,
+  SLIPPAGE: 1,
+  SOL_MINT: "So11111111111111111111111111111111111111112",
+  RAYDIUM_SWAP_API: "https://transaction-v1.raydium.io/compute/swap-base-in",
+  RAYDIUM_TX_API: "https://transaction-v1.raydium.io/transaction/swap-base-in",
 };
 
-const purchasedTokens = new Set();
-let lastRateLimitTime = 0;
+function getWallet() {
+  const privateKey = process.env.WALLET_PRIVATE_KEY;
+  if (!privateKey) throw new Error("WALLET_PRIVATE_KEY未設定");
+  const secretKey = bs58.decode(privateKey);
+  return Keypair.fromSecretKey(secretKey);
+}
 
-async function getTokenPrice(tokenAddress) {
+function getConnection() {
+  const rpcUrl = process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
+  return new Connection(rpcUrl, "confirmed");
+}
+
+async function usdToLamports(usdAmount, solPriceUsd) {
+  return Math.floor((usdAmount / solPriceUsd) * LAMPORTS_PER_SOL);
+}
+
+async function buyToken(tokenMint, solPriceUsd, isPumpFun = false) {
+  console.log("SOL購入開始:", tokenMint);
   try {
-    if (Date.now() - lastRateLimitTime < CONFIG.RATE_LIMIT_WAIT_MS) {
-      const waitRemain = Math.ceil(
-        (CONFIG.RATE_LIMIT_WAIT_MS - (Date.now() - lastRateLimitTime)) / 1000
-      );
-      console.log(`レート制限待機中... あと${waitRemain}秒`);
+    const wallet = getWallet();
+    const connection = getConnection();
+    const lamports = await usdToLamports(TRADE_CONFIG.BUY_AMOUNT_USD, solPriceUsd);
+    console.log(`買い金額: $${TRADE_CONFIG.BUY_AMOUNT_USD} = ${lamports} lamports`);
+
+    const quoteRes = await axios.get(TRADE_CONFIG.RAYDIUM_SWAP_API, {
+      params: {
+        inputMint: TRADE_CONFIG.SOL_MINT,
+        outputMint: tokenMint,
+        amount: lamports,
+        slippageBps: TRADE_CONFIG.SLIPPAGE * 100,
+        txVersion: "V0",
+      },
+      timeout: 15000,
+    });
+
+    const quote = quoteRes.data;
+    if (!quote?.success) {
+      console.error("クォート失敗:", quote?.msg);
       return null;
     }
 
-    const response = await axios.get(
-      `https://api.dexscreener.com/latest/dex/tokens/${tokenAddress}`,
-      { timeout: 10000 }
-    );
-    const data = response.data;
-    if (!data.pairs || data.pairs.length === 0) return null;
-    const solanaPairs = data.pairs.filter(p => p.chainId === "solana");
-    if (solanaPairs.length === 0) return null;
-    return solanaPairs.reduce((best, current) => {
-      return parseFloat(current.liquidity?.usd || 0) > parseFloat(best.liquidity?.usd || 0)
-        ? current : best;
-    }, solanaPairs[0]);
-  } catch (error) {
-    if (error.response?.status === 429) {
-      console.log("DexScreenerレート制限 → 1分待機");
-      lastRateLimitTime = Date.now();
-    } else {
-      console.error(`エラー(${tokenAddress.substring(0, 8)}): ${error.message}`);
+    console.log("取得予定数量:", quote?.data?.outputAmount);
+
+    const txRes = await axios.post(TRADE_CONFIG.RAYDIUM_TX_API, {
+      computeUnitPriceMicroLamports: "100000",
+      swapResponse: quote,
+      txVersion: "V0",
+      wallet: wallet.publicKey.toString(),
+      wrapSol: true,
+      unwrapSol: true,
+    }, { timeout: 15000 });
+
+    if (!txRes.data?.success) {
+      console.error("トランザクション失敗:", txRes.data?.msg);
+      return null;
     }
+
+    const transactions = txRes.data?.data;
+    if (!transactions || transactions.length === 0) return null;
+
+    let txid = null;
+    for (const txData of transactions) {
+      const buf = Buffer.from(txData.transaction, "base64");
+      const tx = VersionedTransaction.deserialize(buf);
+      tx.sign([wallet]);
+      txid = await connection.sendRawTransaction(tx.serialize(), {
+        skipPreflight: true, maxRetries: 3,
+      });
+      console.log("購入成功! TX:", txid);
+    }
+
+    return {
+      txid, tokenMint,
+      buyAmountUsd: TRADE_CONFIG.BUY_AMOUNT_USD,
+      buyPrice: lamports / parseFloat(quote?.data?.outputAmount || 1),
+      tokenAmount: parseFloat(quote?.data?.outputAmount || 0),
+      timestamp: Date.now(),
+      isPumpFun: false,
+    };
+  } catch (error) {
+    console.error("SOL購入エラー:", error.message);
     return null;
   }
 }
 
-async function sendBuyNotification(symbol, price, priceChange5m, txid, dexLink) {
-  const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
-  if (!webhookUrl) return;
-
-  const jstTime = new Intl.DateTimeFormat("ja-JP", {
-    timeZone: "Asia/Tokyo",
-    hour: "2-digit", minute: "2-digit", second: "2-digit",
-  }).format(new Date());
-
+async function sellToken(position, currentPrice, reason) {
+  console.log(`売り注文: ${position.tokenMint} (${reason})`);
   try {
-    await axios.post(webhookUrl, {
-      embeds: [{
-        title: `🛒 ${symbol} 自動購入`,
-        color: 0x00ff00,
-        fields: [
-          { name: "💰 価格", value: `$${price.toFixed(8)}`, inline: true },
-          { name: "📈 5分変化", value: `+${priceChange5m.toFixed(2)}%`, inline: true },
-          { name: "💵 金額", value: "$10 SOL", inline: true },
-          { name: "🔗 TX", value: `[確認](https://solscan.io/tx/${txid})`, inline: false },
-          { name: "🔗 Chart", value: `[DexScreener](${dexLink})`, inline: false },
-        ],
-        footer: { text: jstTime },
-      }],
-    }, { headers: { "Content-Type": "application/json" }, timeout: 10000 });
-  } catch (error) {
-    console.error("購入通知エラー:", error.message);
-  }
-}
+    const wallet = getWallet();
+    const connection = getConnection();
 
-async function checkTrends(solPriceUsd) {
-  console.log("コイン監視中...");
-
-  if (positions.length >= CONFIG.MAX_POSITIONS) {
-    console.log("最大ポジション数に達しています");
-    return;
-  }
-
-  const results = [];
-
-  for (const token of WATCH_TOKENS) {
-    if (purchasedTokens.has(token.address)) continue;
-
-    const pair = await getTokenPrice(token.address);
-    if (!pair) {
-      await new Promise((r) => setTimeout(r, CONFIG.REQUEST_INTERVAL_MS));
-      continue;
-    }
-
-    const priceChange5m = parseFloat(pair.priceChange?.m5 || 0);
-    console.log(`${token.symbol}: ${priceChange5m.toFixed(2)}%`);
-
-    if (priceChange5m >= CONFIG.MIN_PRICE_CHANGE_5M) {
-      results.push({ token, pair, priceChange5m });
-    }
-
-    await new Promise((r) => setTimeout(r, CONFIG.REQUEST_INTERVAL_MS));
-  }
-
-  if (results.length === 0) {
-    console.log("購入条件なし");
-    return;
-  }
-
-  results.sort((a, b) => b.priceChange5m - a.priceChange5m);
-  const best = results[0];
-  console.log(`購入: ${best.token.symbol} +${best.priceChange5m.toFixed(2)}%`);
-
-  const tradeResult = await buyToken(best.token.address, solPriceUsd, false);
-
-  if (tradeResult) {
-    addPosition(tradeResult);
-    purchasedTokens.add(best.token.address);
-    console.log(`購入成功: ${best.token.symbol}`);
-    const dexLink = `https://dexscreener.com/${best.pair.chainId}/${best.pair.pairAddress}`;
-    await sendBuyNotification(
-      best.token.symbol,
-      parseFloat(best.pair.priceUsd || 0),
-      best.priceChange5m,
-      tradeResult.txid,
-      dexLink
+    // 実際のトークン残高を取得
+    const ata = await getAssociatedTokenAddress(
+      new PublicKey(position.tokenMint),
+      wallet.publicKey
     );
-  } else {
-    console.log(`購入失敗: ${best.token.symbol}`);
+    const account = await getAccount(connection, ata);
+    const actualAmount = Number(account.amount);
+
+    if (actualAmount === 0) {
+      console.log("残高なし、売却スキップ");
+      return null;
+    }
+
+    console.log(`実際の残高: ${actualAmount}`);
+
+    const quoteRes = await axios.get(TRADE_CONFIG.RAYDIUM_SWAP_API, {
+      params: {
+        inputMint: position.tokenMint,
+        outputMint: TRADE_CONFIG.SOL_MINT,
+        amount: actualAmount,
+        slippageBps: TRADE_CONFIG.SLIPPAGE * 100,
+        txVersion: "V0",
+      },
+      timeout: 15000,
+    });
+
+    const quote = quoteRes.data;
+    if (!quote?.success) {
+      console.error("売りクォート失敗:", quote?.msg);
+      return null;
+    }
+
+    const txRes = await axios.post(TRADE_CONFIG.RAYDIUM_TX_API, {
+      computeUnitPriceMicroLamports: "100000",
+      swapResponse: quote,
+      txVersion: "V0",
+      wallet: wallet.publicKey.toString(),
+      wrapSol: true,
+      unwrapSol: true,
+    }, { timeout: 15000 });
+
+    if (!txRes.data?.success) {
+      console.error("売りトランザクション失敗:", txRes.data?.msg);
+      return null;
+    }
+
+    const transactions = txRes.data?.data;
+    let txid = null;
+
+    for (const txData of transactions) {
+      const buf = Buffer.from(txData.transaction, "base64");
+      const tx = VersionedTransaction.deserialize(buf);
+      tx.sign([wallet]);
+      txid = await connection.sendRawTransaction(tx.serialize(), {
+        skipPreflight: true, maxRetries: 3,
+      });
+      console.log("売却成功! TX:", txid);
+    }
+
+    return { txid, reason, currentPrice };
+  } catch (error) {
+    console.error("売り注文エラー:", error.message);
+    return null;
   }
 }
 
-module.exports = { checkTrends };
+module.exports = { buyToken, sellToken, TRADE_CONFIG };
