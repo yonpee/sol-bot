@@ -1,57 +1,30 @@
 const axios = require("axios");
 const { buyToken } = require("./trader");
 const { addPosition, positions } = require("./portfolio");
-const { analyzeWithClaude, getAiMarketSentiment } = require("./aiAnalyzer");
+const { analyzeWithClaude } = require("./aiAnalyzer");
 const { addTradeHistory } = require("./api");
 
 const WATCH_TOKENS = [
-  { symbol: "JUP",     address: "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN" },
-  { symbol: "RAY",     address: "4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R" },
-  { symbol: "PYTH",    address: "HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3" },
-  { symbol: "ORCA",    address: "orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE" },
-  { symbol: "DRIFT",   address: "DriFtupJYLTosbwoN8koMbEYSx54aFAVLddWsbksjwg7" },
-  { symbol: "RENDER",  address: "rndrizKT3MK1iimdxRdWabcF7Zg7AR5T4nud4EkHBof" },
-  { symbol: "BONK",    address: "DezXAZ8z7PnrnRJjz3wXBoRgiqCmbVeDbroIkLbCk5" },
-  { symbol: "WIF",     address: "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm" },
-  { symbol: "MEW",     address: "MEW1gQWJ3nEXg2qgERiKu7FAFj79PHvQVREQUzScPP5" },
-  { symbol: "BOME",    address: "ukHH6c7mMyiWCf1b9pnWe25TSpkDDt3H5pQZgZ74J82" },
-  { symbol: "AI16Z",   address: "HeLp6NuQkmYB4pYWo2zYs22mESHXPQYzXbB8n4V98jwC" },
-  { symbol: "ZEREBRO", address: "8x5VqbHA8D7NkD52uNuS5nnt3PwA8pLD34ymskeSo2Wn" },
-  { symbol: "SLERF",   address: "7BgBvyjrZX1YKz4oh9mjb8ZScatkkwb8DzFx7LoiVkM3" },
+  { symbol: "JUP",   address: "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN" },
+  { symbol: "RAY",   address: "4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R" },
+  { symbol: "BONK",  address: "DezXAZ8z7PnrnRJjz3wXBoRgiqCmbVeDbroIkLbCk5" },
+  { symbol: "WIF",   address: "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm" },
+  { symbol: "MEW",   address: "MEW1gQWJ3nEXg2qgERiKu7FAFj79PHvQVREQUzScPP5" },
+  { symbol: "PYTH",  address: "HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3" },
+  { symbol: "ORCA",  address: "orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE" },
+  { symbol: "AI16Z", address: "HeLp6NuQkmYB4pYWo2zYs22mESHXPQYzXbB8n4V98jwC" },
 ];
 
 const CONFIG = {
   MIN_PRICE_CHANGE_5M: 1,
   MIN_SCORE: 40,
   MAX_POSITIONS: 1,
-  REQUEST_INTERVAL_MS: 500,
+  REQUEST_INTERVAL_MS: 600,
   RATE_LIMIT_WAIT_MS: 60000,
 };
 
 const purchasedTokens = new Set();
 let lastRateLimitTime = 0;
-let solTrend = 0;
-let lastAiAnalysisTime = 0;
-let cachedMarketSentiment = { score: 0, sentiment: "neutral", shouldTrade: true, reason: "未分析" };
-
-async function getSolTrend() {
-  try {
-    const response = await axios.get(
-      "https://api.dexscreener.com/latest/dex/tokens/So11111111111111111111111111111111111111112",
-      { timeout: 10000 }
-    );
-    const pairs = response.data?.pairs?.filter(p => p.chainId === "solana") || [];
-    if (pairs.length === 0) return 0;
-    const best = pairs.reduce((a, b) =>
-      parseFloat(b.liquidity?.usd || 0) > parseFloat(a.liquidity?.usd || 0) ? b : a
-    );
-    solTrend = parseFloat(best.priceChange?.h1 || 0);
-    console.log("SOLトレンド(1h): " + solTrend.toFixed(2) + "%");
-    return solTrend;
-  } catch (error) {
-    return 0;
-  }
-}
 
 function analyzeToken(pair) {
   const priceChange5m = parseFloat(pair.priceChange?.m5 || 0);
@@ -68,7 +41,6 @@ function analyzeToken(pair) {
 
   if (priceChange5m >= 1) { score += 30; reasons.push("5m+" + priceChange5m.toFixed(1) + "%"); }
   if (priceChange1h > 0) { score += 20; reasons.push("1時間プラス"); }
-  else { score -= 5; }
   if (priceChange24h > 0) { score += 10; reasons.push("24時間上昇"); }
 
   const volumeRatio = volume6h > 0 ? (volume24h / 4) / volume6h : 1;
@@ -77,7 +49,6 @@ function analyzeToken(pair) {
   const txRatio = txns1h > 0 ? (txns5m * 12) / txns1h : 1;
   if (txRatio > 1.5) { score += 15; reasons.push("取引" + txRatio.toFixed(1) + "倍増"); }
 
-  if (solTrend < -3) { score -= 15; reasons.push("SOL下落注意"); }
   if (liquidity < 100000) { score -= 30; reasons.push("流動性低"); }
 
   return { score, reasons, priceChange5m, priceChange1h, priceChange24h };
@@ -86,10 +57,6 @@ function analyzeToken(pair) {
 async function getTokenPrice(tokenAddress) {
   try {
     if (Date.now() - lastRateLimitTime < CONFIG.RATE_LIMIT_WAIT_MS) {
-      const waitRemain = Math.ceil(
-        (CONFIG.RATE_LIMIT_WAIT_MS - (Date.now() - lastRateLimitTime)) / 1000
-      );
-      console.log("レート制限待機中... あと" + waitRemain + "秒");
       return null;
     }
     const response = await axios.get(
@@ -106,7 +73,6 @@ async function getTokenPrice(tokenAddress) {
     }, solanaPairs[0]);
   } catch (error) {
     if (error.response?.status === 429) {
-      console.log("DexScreenerレート制限 → 1分待機");
       lastRateLimitTime = Date.now();
     }
     return null;
@@ -116,14 +82,10 @@ async function getTokenPrice(tokenAddress) {
 async function sendBuyNotification(symbol, analysis, aiResult, txid, dexLink) {
   const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
   if (!webhookUrl) return;
-
   const jstTime = new Date().toLocaleTimeString("ja-JP", { timeZone: "Asia/Tokyo" });
-  const sentimentEmoji = aiResult.sentiment === "bullish" ? "🟢"
-    : aiResult.sentiment === "bearish" ? "🔴" : "🟡";
-
   try {
     await axios.post(webhookUrl, {
-      content: "🤖 **AI判断で自動購入！**",
+      content: "🤖 **自動購入！**",
       embeds: [{
         title: symbol + " 購入 (スコア: " + analysis.score + ")",
         color: 0x00ff00,
@@ -131,14 +93,13 @@ async function sendBuyNotification(symbol, analysis, aiResult, txid, dexLink) {
           { name: "📈 5分変化", value: "+" + analysis.priceChange5m.toFixed(2) + "%", inline: true },
           { name: "📊 1時間変化", value: analysis.priceChange1h.toFixed(2) + "%", inline: true },
           { name: "💵 金額", value: "$10相当のSOL", inline: true },
-          { name: "🎯 利確", value: "+8%", inline: true },
-          { name: "🔴 損切り", value: "-4%", inline: true },
-          { name: sentimentEmoji + " AI", value: aiResult.reason || "分析完了", inline: true },
+          { name: "🎯 利確/損切り", value: "+8% / -4%", inline: true },
+          { name: "🤖 AI", value: (aiResult?.reason || "分析完了"), inline: true },
           { name: "📊 理由", value: analysis.reasons.join(" / ") || "なし", inline: false },
           { name: "🔗 TX", value: "[確認](https://solscan.io/tx/" + txid + ")", inline: false },
           { name: "🔗 Chart", value: "[DexScreener](" + dexLink + ")", inline: false },
         ],
-        footer: { text: "SOL: " + solTrend.toFixed(2) + "% | " + jstTime },
+        footer: { text: jstTime },
       }],
     }, { headers: { "Content-Type": "application/json" }, timeout: 10000 });
   } catch (error) {
@@ -154,28 +115,6 @@ async function checkTrends(solPriceUsd) {
     return;
   }
 
-  await getSolTrend();
-
-  // SOLが大幅下落中のみ見送り（-5%以上）
-  if (solTrend < -5) {
-    console.log("SOL大幅下落中(" + solTrend.toFixed(2) + "%) → 購入見送り");
-    return;
-  }
-
-  // AI市場分析（10分ごとに更新）
-  const now = Date.now();
-  if (now - lastAiAnalysisTime > 10 * 60 * 1000) {
-    cachedMarketSentiment = await getAiMarketSentiment({
-      solTrend: solTrend,
-      avgScore: 0,
-    });
-    lastAiAnalysisTime = now;
-  }
-
-  // AIがbearishでもテクニカルスコアが高ければ購入する
-  // AIは参考程度に使う
-  const aiPenalty = cachedMarketSentiment.sentiment === "bearish" ? -10 : 0;
-
   const results = [];
 
   for (const token of WATCH_TOKENS) {
@@ -188,11 +127,10 @@ async function checkTrends(solPriceUsd) {
     }
 
     const analysis = analyzeToken(pair);
-    const totalScore = analysis.score + aiPenalty;
-    console.log(token.symbol + ": 5m " + analysis.priceChange5m.toFixed(2) + "% | スコア: " + totalScore);
+    console.log(token.symbol + ": " + analysis.priceChange5m.toFixed(2) + "% | " + analysis.score + "点");
 
-    if (totalScore >= CONFIG.MIN_SCORE && analysis.priceChange5m >= CONFIG.MIN_PRICE_CHANGE_5M) {
-      results.push({ token, pair, analysis, totalScore });
+    if (analysis.score >= CONFIG.MIN_SCORE && analysis.priceChange5m >= CONFIG.MIN_PRICE_CHANGE_5M) {
+      results.push({ token, pair, analysis });
     }
 
     await new Promise((r) => setTimeout(r, CONFIG.REQUEST_INTERVAL_MS));
@@ -203,12 +141,9 @@ async function checkTrends(solPriceUsd) {
     return;
   }
 
-  results.sort((a, b) => b.totalScore - a.totalScore);
-  console.log("購入候補: " + results.length + "件");
+  results.sort((a, b) => b.analysis.score - a.analysis.score);
 
-  let selectedResult = null;
   for (const result of results) {
-    console.log("流動性チェック中: " + result.token.symbol);
     const tradeResult = await buyToken(result.token.address, solPriceUsd, false);
     if (tradeResult) {
       tradeResult.symbol = result.token.symbol;
@@ -225,38 +160,20 @@ async function checkTrends(solPriceUsd) {
         txid: tradeResult.txid,
       });
 
-      selectedResult = { result, tradeResult };
+      const aiResult = await analyzeWithClaude(result.token.symbol, {
+        priceChange5m: result.analysis.priceChange5m,
+        priceChange1h: result.analysis.priceChange1h,
+        priceChange24h: result.analysis.priceChange24h,
+        score: result.analysis.score,
+        reasons: result.analysis.reasons,
+      });
+
+      const dexLink = "https://dexscreener.com/" + result.pair.chainId + "/" + result.pair.pairAddress;
+      await sendBuyNotification(result.token.symbol, result.analysis, aiResult, tradeResult.txid, dexLink);
       break;
-    } else {
-      console.log(result.token.symbol + ": ルートなし → 次の候補へ");
     }
     await new Promise((r) => setTimeout(r, 500));
   }
-
-  if (!selectedResult) {
-    console.log("全候補の購入失敗");
-    return;
-  }
-
-  const aiResult = await analyzeWithClaude(
-    selectedResult.result.token.symbol,
-    {
-      priceChange5m: selectedResult.result.analysis.priceChange5m,
-      priceChange1h: selectedResult.result.analysis.priceChange1h,
-      priceChange24h: selectedResult.result.analysis.priceChange24h,
-      score: selectedResult.result.analysis.score,
-      reasons: selectedResult.result.analysis.reasons,
-    }
-  );
-
-  const dexLink = "https://dexscreener.com/" + selectedResult.result.pair.chainId + "/" + selectedResult.result.pair.pairAddress;
-  await sendBuyNotification(
-    selectedResult.result.token.symbol,
-    selectedResult.result.analysis,
-    aiResult,
-    selectedResult.tradeResult.txid,
-    dexLink
-  );
 }
 
 module.exports = { checkTrends };
