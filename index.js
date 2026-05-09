@@ -4,6 +4,7 @@ const { getSolanaPrice } = require("./priceChecker");
 const { sendDiscordNotification } = require("./notifier");
 const { checkTrends } = require("./trendScanner");
 const { monitorPositions, loadPositionFromEnv } = require("./portfolio");
+const { startApi } = require("./api");
 
 const CONFIG = {
   CHECK_INTERVAL_MINUTES: 2,
@@ -20,10 +21,10 @@ function checkEnvironmentVariables() {
   let hasError = false;
   for (const varName of requiredVars) {
     if (!process.env[varName]) {
-      console.error(`${varName} が未設定！`);
+      console.error(varName + " が未設定！");
       hasError = true;
     } else {
-      console.log(`${varName}: 設定済み`);
+      console.log(varName + ": 設定済み");
     }
   }
   if (hasError) { process.exit(1); }
@@ -53,10 +54,10 @@ function detectPriceDrop(currentPrice) {
 
 async function checkPrice() {
   const now = new Date().toLocaleTimeString("ja-JP", { timeZone: "Asia/Tokyo" });
-  console.log(`\n[${now}] チェック開始...`);
+  console.log("\n[" + now + "] チェック開始...");
   const priceData = await getSolanaPrice();
   if (!priceData) { console.log("価格取得失敗"); return null; }
-  console.log(`SOL: $${priceData.price.toFixed(4)}`);
+  console.log("SOL: $" + priceData.price.toFixed(4));
   updatePriceHistory(priceData);
   const dropInfo = detectPriceDrop(priceData.price);
   if (!dropInfo) { console.log("比較データ収集中..."); return priceData; }
@@ -71,13 +72,16 @@ async function startBot() {
   checkEnvironmentVariables();
   loadPositionFromEnv();
 
+  // APIサーバー起動
+  startApi();
+
   const priceData = await checkPrice();
   if (priceData) {
     await checkTrends(priceData.price);
     await monitorPositions();
   }
 
-  cron.schedule(`*/${CONFIG.CHECK_INTERVAL_MINUTES} * * * *`, async () => {
+  cron.schedule("*/" + CONFIG.CHECK_INTERVAL_MINUTES + " * * * *", async () => {
     const pd = await checkPrice();
     if (pd) {
       await checkTrends(pd.price);
