@@ -15,13 +15,12 @@ const TRADE_CONFIG = {
   BUY_AMOUNT_USD: 10,
   TAKE_PROFIT_PERCENT: 8,
   STOP_LOSS_PERCENT: -4,
-  SLIPPAGE: 1,
+  SLIPPAGE: 3,
   SOL_MINT: "So11111111111111111111111111111111111111112",
   RAYDIUM_SWAP_API: "https://transaction-v1.raydium.io/compute/swap-base-in",
   RAYDIUM_TX_API: "https://transaction-v1.raydium.io/transaction/swap-base-in",
 };
 
-// 既知のトークンデシマル
 const TOKEN_DECIMALS = {
   "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN": 6,
   "4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R": 6,
@@ -98,6 +97,9 @@ async function ensureTokenAccount(connection, wallet, mintAddress) {
     });
     await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight });
     console.log("トークンアカウント作成完了!");
+
+    // アカウント確定を待機
+    await new Promise(r => setTimeout(r, 3000));
     return ata;
   } catch (error) {
     console.error("トークンアカウント作成エラー:", error.message);
@@ -174,7 +176,6 @@ async function buyToken(tokenMint, solPriceUsd, isPumpFun = false) {
       console.log("購入成功! TX:", txid);
     }
 
-    // DexScreenerから実際の価格を取得
     const outputAmountRaw = parseFloat(quote?.data?.outputAmount || 1);
     const decimals = TOKEN_DECIMALS[tokenMint] || 6;
     const outputAmount = outputAmountRaw / Math.pow(10, decimals);
@@ -210,51 +211,69 @@ async function sellToken(position, currentPrice, reason) {
 
     await ensureTokenAccount(connection, wallet, position.tokenMint);
 
-    const quoteRes = await axios.get(TRADE_CONFIG.RAYDIUM_SWAP_API, {
-      params: {
-        inputMint: position.tokenMint,
-        outputMint: TRADE_CONFIG.SOL_MINT,
-        amount: Math.floor(position.tokenAmount),
-        slippageBps: TRADE_CONFIG.SLIPPAGE * 100,
-        txVersion: "V0",
-      },
-      timeout: 15000,
-    });
+    // 売却前に2秒待機してアカウントを確定
+    await new Promise(r => setTimeout(r, 2000));
 
-    const quote = quoteRes.data;
-    if (!quote?.success) {
-      console.error("売りクォート失敗:", quote?.msg);
-      return null;
+    // 3回リトライ
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const quoteRes = await axios.get(TRADE_CONFIG.RAYDIUM_SWAP_API, {
+          params: {
+            inputMint: position.tokenMint,
+            outputMint: TRADE_CONFIG.SOL_MINT,
+            amount: Math.floor(position.tokenAmount),
+            slippageBps: TRADE_CONFIG.SLIPPAGE * 100,
+            txVersion: "V0",
+          },
+          timeout: 15000,
+        });
+
+        const quote = quoteRes.data;
+        if (!quote?.success) {
+          console.error("売りクォート失敗(" + attempt + "):", quote?.msg);
+          if (attempt < 3) await new Promise(r => setTimeout(r, 2000));
+          continue;
+        }
+
+        const txRes = await axios.post(TRADE_CONFIG.RAYDIUM_TX_API, {
+          computeUnitPriceMicroLamports: "100000",
+          swapResponse: quote,
+          txVersion: "V0",
+          wallet: wallet.publicKey.toString(),
+          wrapSol: true,
+          unwrapSol: true,
+        }, { timeout: 15000 });
+
+        if (!txRes.data?.success) {
+          console.error("売りトランザクション失敗(" + attempt + "):", txRes.data?.msg);
+          if (attempt < 3) await new Promise(r => setTimeout(r, 2000));
+          continue;
+        }
+
+        const transactions = txRes.data?.data;
+        let txid = null;
+
+        for (const txData of transactions) {
+          const buf = Buffer.from(txData.transaction, "base64");
+          const tx = VersionedTransaction.deserialize(buf);
+          tx.sign([wallet]);
+          txid = await connection.sendRawTransaction(tx.serialize(), {
+            skipPreflight: true, maxRetries: 3,
+          });
+          console.log("売却成功! TX:", txid);
+        }
+
+        return { txid, reason, currentPrice };
+
+      } catch (e) {
+        console.error("売却試行" + attempt + "エラー:", e.message);
+        if (attempt < 3) await new Promise(r => setTimeout(r, 2000));
+      }
     }
 
-    const txRes = await axios.post(TRADE_CONFIG.RAYDIUM_TX_API, {
-      computeUnitPriceMicroLamports: "100000",
-      swapResponse: quote,
-      txVersion: "V0",
-      wallet: wallet.publicKey.toString(),
-      wrapSol: true,
-      unwrapSol: true,
-    }, { timeout: 15000 });
+    console.error("3回試行して売却失敗");
+    return null;
 
-    if (!txRes.data?.success) {
-      console.error("売りトランザクション失敗:", txRes.data?.msg);
-      return null;
-    }
-
-    const transactions = txRes.data?.data;
-    let txid = null;
-
-    for (const txData of transactions) {
-      const buf = Buffer.from(txData.transaction, "base64");
-      const tx = VersionedTransaction.deserialize(buf);
-      tx.sign([wallet]);
-      txid = await connection.sendRawTransaction(tx.serialize(), {
-        skipPreflight: true, maxRetries: 3,
-      });
-      console.log("売却成功! TX:", txid);
-    }
-
-    return { txid, reason, currentPrice };
   } catch (error) {
     console.error("売り注文エラー:", error.message);
     return null;
