@@ -21,6 +21,40 @@ const TRADE_CONFIG = {
   RAYDIUM_TX_API: "https://transaction-v1.raydium.io/transaction/swap-base-in",
 };
 
+// 既知のトークンデシマル
+const TOKEN_DECIMALS = {
+  "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN": 6,
+  "4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R": 6,
+  "HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3": 6,
+  "orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE": 6,
+  "DriFtupJYLTosbwoN8koMbEYSx54aFAVLddWsbksjwg7": 6,
+  "rndrizKT3MK1iimdxRdWabcF7Zg7AR5T4nud4EkHBof": 8,
+  "DezXAZ8z7PnrnRJjz3wXBoRgiqCmbVeDbroIkLbCk5": 5,
+  "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm": 6,
+  "MEW1gQWJ3nEXg2qgERiKu7FAFj79PHvQVREQUzScPP5": 6,
+  "ukHH6c7mMyiWCf1b9pnWe25TSpkDDt3H5pQZgZ74J82": 6,
+  "7BgBvyjrZX1YKz4oh9mjb8ZScatkkwb8DzFx7LoiVkM3": 9,
+  "HeLp6NuQkmYB4pYWo2zYs22mESHXPQYzXbB8n4V98jwC": 6,
+  "8x5VqbHA8D7NkD52uNuS5nnt3PwA8pLD34ymskeSo2Wn": 6,
+};
+
+async function getTokenPriceUsd(tokenMint) {
+  try {
+    const response = await axios.get(
+      "https://api.dexscreener.com/latest/dex/tokens/" + tokenMint,
+      { timeout: 10000 }
+    );
+    const pairs = response.data?.pairs?.filter(p => p.chainId === "solana") || [];
+    if (pairs.length === 0) return null;
+    const best = pairs.reduce((a, b) =>
+      parseFloat(b.liquidity?.usd || 0) > parseFloat(a.liquidity?.usd || 0) ? b : a
+    );
+    return parseFloat(best.priceUsd || 0);
+  } catch (error) {
+    return null;
+  }
+}
+
 function getWallet() {
   const privateKey = process.env.WALLET_PRIVATE_KEY;
   if (!privateKey) throw new Error("WALLET_PRIVATE_KEY未設定");
@@ -88,7 +122,7 @@ async function checkRaydiumRoute(tokenMint, lamports) {
       console.log("Raydiumルートなし: " + quote?.msg);
       return null;
     }
-    console.log("Raydiumルート確認OK outputAmount:" + quote?.data?.outputAmount + " decimals:" + quote?.data?.outputDecimals);
+    console.log("Raydiumルート確認OK: " + quote?.data?.outputAmount);
     return quote;
   } catch (error) {
     console.error("ルートチェックエラー:", error.message);
@@ -140,13 +174,16 @@ async function buyToken(tokenMint, solPriceUsd, isPumpFun = false) {
       console.log("購入成功! TX:", txid);
     }
 
-    // デシマルを考慮したbuyPrice計算
+    // DexScreenerから実際の価格を取得
     const outputAmountRaw = parseFloat(quote?.data?.outputAmount || 1);
-    const outputDecimals = parseFloat(quote?.data?.outputDecimals || 6);
-    const outputAmount = outputAmountRaw / Math.pow(10, outputDecimals);
-    const inputAmountSol = lamports / LAMPORTS_PER_SOL;
-    const buyPriceInSol = inputAmountSol / outputAmount;
-    const buyPriceUsd = buyPriceInSol * solPriceUsd;
+    const decimals = TOKEN_DECIMALS[tokenMint] || 6;
+    const outputAmount = outputAmountRaw / Math.pow(10, decimals);
+
+    let buyPriceUsd = await getTokenPriceUsd(tokenMint);
+    if (!buyPriceUsd) {
+      const inputAmountSol = lamports / LAMPORTS_PER_SOL;
+      buyPriceUsd = (inputAmountSol * solPriceUsd) / outputAmount;
+    }
 
     console.log("購入数量: " + outputAmount.toFixed(4) + " tokens");
     console.log("購入価格: $" + buyPriceUsd.toFixed(6) + " per token");
