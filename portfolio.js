@@ -1,5 +1,6 @@
 const axios = require("axios");
 const { createClient } = require("@supabase/supabase-js");
+const ws = require("ws");
 const { sellToken, TRADE_CONFIG } = require("./trader");
 const { addTradeHistory } = require("./api");
 
@@ -9,7 +10,9 @@ function getSupabase() {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_KEY;
   if (!url || !key) return null;
-  return createClient(url, key);
+  return createClient(url, key, {
+    realtime: { transport: ws },
+  });
 }
 
 async function savePositionToSupabase(position) {
@@ -46,7 +49,7 @@ async function saveHistoryToSupabase(trade) {
   const supabase = getSupabase();
   if (!supabase) return;
   try {
-    await supabase.from("trade_history").insert([{
+    const { error } = await supabase.from("trade_history").insert([{
       symbol: trade.symbol,
       type: trade.type,
       amount: trade.amount,
@@ -54,6 +57,7 @@ async function saveHistoryToSupabase(trade) {
       reason: trade.reason,
       txid: trade.txid,
     }]);
+    if (error) throw error;
   } catch (error) {
     console.error("Supabase履歴保存エラー:", error.message);
   }
@@ -276,4 +280,4 @@ async function monitorPositions() {
   }
 }
 
-module.exports = { addPosition, removePosition, monitorPositions, positions, loadPositionFromSupabase, loadPositionFromEnv, loadHistoryFromSupabase };
+module.exports = { addPosition, removePosition, monitorPositions, positions, loadPositionFromSupabase, loadPositionFromEnv, loadHistoryFromSupabase, saveHistoryToSupabase };
