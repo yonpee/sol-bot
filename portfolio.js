@@ -1,50 +1,115 @@
 const axios = require("axios");
+const { createClient } = require("@supabase/supabase-js");
 const { sellToken, TRADE_CONFIG } = require("./trader");
 const { addTradeHistory } = require("./api");
 
 const positions = [];
 
-async function savePositionToRailway(position) {
+function getSupabase() {
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_KEY;
+  if (!url || !key) return null;
+  return createClient(url, key);
+}
+
+async function savePositionToSupabase(position) {
+  const supabase = getSupabase();
+  if (!supabase) {
+    console.log("Supabase未設定 → スキップ");
+    return;
+  }
   try {
-    const token = process.env.RAILWAY_TOKEN;
-    const serviceId = process.env.RAILWAY_SERVICE_ID;
-
-    if (!token || !serviceId) {
-      process.env.CURRENT_POSITION = position ? JSON.stringify(position) : "{}";
-      return;
+    await supabase.from("positions").delete().neq("id", 0);
+    if (position) {
+      const { error } = await supabase.from("positions").insert([{
+        token_mint: position.tokenMint,
+        symbol: position.symbol || "不明",
+        buy_price: position.buyPrice,
+        token_amount: position.tokenAmount,
+        buy_amount_usd: position.buyAmountUsd,
+        txid: position.txid,
+        take_profit: position.takeProfit || TRADE_CONFIG.TAKE_PROFIT_PERCENT,
+        stop_loss: position.stopLoss || TRADE_CONFIG.STOP_LOSS_PERCENT,
+        timestamp: position.timestamp,
+      }]);
+      if (error) throw error;
+      console.log("Supabaseにポジション保存完了");
+    } else {
+      console.log("Supabaseのポジションをクリア");
     }
-
-    const value = position ? JSON.stringify(position) : "{}";
-
-    await axios.post(
-      "https://backboard.railway.app/graphql/v2",
-      {
-        query: `
-          mutation UpsertVariable($input: VariableUpsertInput!) {
-            variableUpsert(input: $input)
-          }
-        `,
-        variables: {
-          input: {
-            serviceId: serviceId,
-            environmentId: process.env.RAILWAY_ENVIRONMENT_ID || "",
-            name: "CURRENT_POSITION",
-            value: value,
-          },
-        },
-      },
-      {
-        headers: {
-          Authorization: "Bearer " + token,
-          "Content-Type": "application/json",
-        },
-        timeout: 10000,
-      }
-    );
-    console.log("ポジションをRailwayに保存しました");
   } catch (error) {
-    console.error("Railway保存エラー:", error.message);
-    process.env.CURRENT_POSITION = position ? JSON.stringify(position) : "{}";
+    console.error("Supabase保存エラー:", error.message);
+  }
+}
+
+async function saveHistoryToSupabase(trade) {
+  const supabase = getSupabase();
+  if (!supabase) return;
+  try {
+    await supabase.from("trade_history").insert([{
+      symbol: trade.symbol,
+      type: trade.type,
+      amount: trade.amount,
+      profit: trade.profit,
+      reason: trade.reason,
+      txid: trade.txid,
+    }]);
+  } catch (error) {
+    console.error("Supabase履歴保存エラー:", error.message);
+  }
+}
+
+async function loadPositionFromSupabase() {
+  const supabase = getSupabase();
+  if (!supabase) {
+    loadPositionFromEnv();
+    return;
+  }
+  try {
+    const { data, error } = await supabase
+      .from("positions")
+      .select("*")
+      .limit(1);
+    if (error) throw error;
+    if (data && data.length > 0) {
+      const row = data[0];
+      const position = {
+        tokenMint: row.token_mint,
+        symbol: row.symbol,
+        buyPrice: parseFloat(row.buy_price),
+        tokenAmount: parseFloat(row.token_amount),
+        buyAmountUsd: parseFloat(row.buy_amount_usd),
+        txid: row.txid,
+        takeProfit: parseFloat(row.take_profit),
+        stopLoss: parseFloat(row.stop_loss),
+        timestamp: parseInt(row.timestamp),
+        retryCount: 0,
+      };
+      positions.push(position);
+      console.log("Supabaseからポジション復元: " + position.symbol);
+    } else {
+      console.log("保存済みポジションなし");
+    }
+  } catch (error) {
+    console.error("Supabase復元エラー:", error.message);
+    loadPositionFromEnv();
+  }
+}
+
+async function loadHistoryFromSupabase() {
+  const supabase = getSupabase();
+  if (!supabase) return [];
+  try {
+    const { data, error } = await supabase
+      .from("trade_history")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(50);
+    if (error) throw error;
+    return data || [];
+  } catch (error) {
+    console.error("Supabase履歴取得エラー:", error.message);
+    return [];
   }
 }
 
@@ -58,7 +123,7 @@ function loadPositionFromEnv() {
     const position = JSON.parse(saved);
     if (position && position.tokenMint) {
       positions.push(position);
-      console.log("ポジション復元: " + position.tokenMint.substring(0, 8) + "...");
+      console.log("envからポジション復元: " + position.tokenMint.substring(0, 8) + "...");
     }
   } catch (error) {
     console.error("ポジション復元エラー:", error.message);
@@ -103,7 +168,7 @@ function addPosition(tradeResult) {
     retryCount: 0,
   };
   positions.push(position);
-  savePositionToRailway(position);
+  savePositionToSupabase(position);
   console.log("ポジション追加: " + position.symbol);
 }
 
@@ -111,7 +176,7 @@ function removePosition(tokenMint) {
   const index = positions.findIndex((p) => p.tokenMint === tokenMint);
   if (index !== -1) {
     positions.splice(index, 1);
-    savePositionToRailway(null);
+    savePositionToSupabase(null);
     console.log("ポジション削除完了");
   }
 }
@@ -119,10 +184,8 @@ function removePosition(tokenMint) {
 async function sendSellNotification(position, sellResult, profitPercent) {
   const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
   if (!webhookUrl) return;
-
   const isProfit = profitPercent >= 0;
   const jstTime = new Date().toLocaleTimeString("ja-JP", { timeZone: "Asia/Tokyo" });
-
   try {
     await axios.post(webhookUrl, {
       content: isProfit ? "💰 **利確！**" : "🔴 **損切り！**",
@@ -132,9 +195,7 @@ async function sendSellNotification(position, sellResult, profitPercent) {
         fields: [
           { name: "📊 損益", value: "**" + profitPercent.toFixed(2) + "%**", inline: true },
           { name: "💰 投資額", value: "$" + position.buyAmountUsd, inline: true },
-          { name: "🔗 TX", value: sellResult?.txid
-            ? "[確認](https://solscan.io/tx/" + sellResult.txid + ")"
-            : "なし", inline: false },
+          { name: "🔗 TX", value: sellResult?.txid ? "[確認](https://solscan.io/tx/" + sellResult.txid + ")" : "なし", inline: false },
         ],
         footer: { text: jstTime },
       }],
@@ -154,36 +215,23 @@ async function monitorPositions() {
 
   for (const position of [...positions]) {
     const holdingMinutes = (Date.now() - position.timestamp) / 1000 / 60;
-    console.log("保有時間: " + holdingMinutes.toFixed(1) + "分");
-
-    // ポジションごとの利確・損切りライン
     const takeProfitLine = position.takeProfit || TRADE_CONFIG.TAKE_PROFIT_PERCENT;
     const stopLossLine = position.stopLoss || TRADE_CONFIG.STOP_LOSS_PERCENT;
 
-    // 30分強制売却
     if (holdingMinutes >= 30) {
       console.log("30分経過 → 強制売却");
       const result = await sellToken(position, 0, "時間切れ");
       if (result) {
         await sendSellNotification(position, result, 0);
-        addTradeHistory({
-          symbol: position.symbol || "不明",
-          type: "sell",
-          amount: position.buyAmountUsd,
-          profit: 0,
-          reason: "時間切れ（30分）",
-          txid: result.txid,
-        });
+        await saveHistoryToSupabase({ symbol: position.symbol, type: "sell", amount: position.buyAmountUsd, profit: 0, reason: "時間切れ", txid: result.txid });
+        addTradeHistory({ symbol: position.symbol, type: "sell", amount: position.buyAmountUsd, profit: 0, reason: "時間切れ（30分）", txid: result.txid });
       }
       removePosition(position.tokenMint);
       continue;
     }
 
     const pairData = await getCurrentPrice(position.tokenMint);
-    if (!pairData) {
-      console.log("価格取得失敗");
-      continue;
-    }
+    if (!pairData) { console.log("価格取得失敗"); continue; }
 
     const currentPrice = parseFloat(pairData.priceUsd || 0);
     const profitPercent = position.buyPrice > 0
@@ -192,21 +240,14 @@ async function monitorPositions() {
 
     console.log("損益: " + profitPercent.toFixed(2) + "% | 利確: +" + takeProfitLine + "% | 損切り: " + stopLossLine + "%");
 
-    // 利確
     if (profitPercent >= takeProfitLine) {
       console.log("利確! +" + profitPercent.toFixed(2) + "%");
       const result = await sellToken(position, currentPrice, "利確");
       if (result) {
         await sendSellNotification(position, result, profitPercent);
-        const profitUsd = position.buyAmountUsd * profitPercent / 100;
-        addTradeHistory({
-          symbol: position.symbol || "不明",
-          type: "sell",
-          amount: position.buyAmountUsd,
-          profit: parseFloat(profitUsd.toFixed(2)),
-          reason: "利確 +" + profitPercent.toFixed(2) + "%",
-          txid: result.txid,
-        });
+        const profitUsd = parseFloat((position.buyAmountUsd * profitPercent / 100).toFixed(2));
+        await saveHistoryToSupabase({ symbol: position.symbol, type: "sell", amount: position.buyAmountUsd, profit: profitUsd, reason: "利確 +" + profitPercent.toFixed(2) + "%", txid: result.txid });
+        addTradeHistory({ symbol: position.symbol, type: "sell", amount: position.buyAmountUsd, profit: profitUsd, reason: "利確 +" + profitPercent.toFixed(2) + "%", txid: result.txid });
         removePosition(position.tokenMint);
       } else {
         position.retryCount = (position.retryCount || 0) + 1;
@@ -216,21 +257,14 @@ async function monitorPositions() {
       continue;
     }
 
-    // 損切り
     if (profitPercent <= stopLossLine) {
       console.log("損切り! " + profitPercent.toFixed(2) + "%");
       const result = await sellToken(position, currentPrice, "損切り");
       if (result) {
         await sendSellNotification(position, result, profitPercent);
-        const profitUsd = position.buyAmountUsd * profitPercent / 100;
-        addTradeHistory({
-          symbol: position.symbol || "不明",
-          type: "sell",
-          amount: position.buyAmountUsd,
-          profit: parseFloat(profitUsd.toFixed(2)),
-          reason: "損切り " + profitPercent.toFixed(2) + "%",
-          txid: result.txid,
-        });
+        const profitUsd = parseFloat((position.buyAmountUsd * profitPercent / 100).toFixed(2));
+        await saveHistoryToSupabase({ symbol: position.symbol, type: "sell", amount: position.buyAmountUsd, profit: profitUsd, reason: "損切り " + profitPercent.toFixed(2) + "%", txid: result.txid });
+        addTradeHistory({ symbol: position.symbol, type: "sell", amount: position.buyAmountUsd, profit: profitUsd, reason: "損切り " + profitPercent.toFixed(2) + "%", txid: result.txid });
       } else {
         position.retryCount = (position.retryCount || 0) + 1;
         console.log("売却失敗 リトライ" + position.retryCount + "/3");
@@ -242,4 +276,4 @@ async function monitorPositions() {
   }
 }
 
-module.exports = { addPosition, removePosition, monitorPositions, positions, loadPositionFromEnv };
+module.exports = { addPosition, removePosition, monitorPositions, positions, loadPositionFromSupabase, loadPositionFromEnv, loadHistoryFromSupabase };
