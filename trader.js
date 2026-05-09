@@ -7,8 +7,8 @@ const bs58 = require("bs58");
 
 const TRADE_CONFIG = {
   BUY_AMOUNT_USD: 10,
-  TAKE_PROFIT_PERCENT: 3,
-  STOP_LOSS_PERCENT: -3,
+  TAKE_PROFIT_PERCENT: 8,
+  STOP_LOSS_PERCENT: -4,
   SLIPPAGE: 1,
   SOL_MINT: "So11111111111111111111111111111111111111112",
   RAYDIUM_SWAP_API: "https://transaction-v1.raydium.io/compute/swap-base-in",
@@ -31,14 +31,9 @@ async function usdToLamports(usdAmount, solPriceUsd) {
   return Math.floor((usdAmount / solPriceUsd) * LAMPORTS_PER_SOL);
 }
 
-async function buyToken(tokenMint, solPriceUsd, isPumpFun = false) {
-  console.log("SOL購入開始:", tokenMint);
+// Raydiumのルートが存在するか事前チェック
+async function checkRaydiumRoute(tokenMint, lamports) {
   try {
-    const wallet = getWallet();
-    const connection = getConnection();
-    const lamports = await usdToLamports(TRADE_CONFIG.BUY_AMOUNT_USD, solPriceUsd);
-    console.log(`買い金額: $${TRADE_CONFIG.BUY_AMOUNT_USD} = ${lamports} lamports`);
-
     const quoteRes = await axios.get(TRADE_CONFIG.RAYDIUM_SWAP_API, {
       params: {
         inputMint: TRADE_CONFIG.SOL_MINT,
@@ -47,16 +42,35 @@ async function buyToken(tokenMint, solPriceUsd, isPumpFun = false) {
         slippageBps: TRADE_CONFIG.SLIPPAGE * 100,
         txVersion: "V0",
       },
-      timeout: 15000,
+      timeout: 10000,
     });
-
     const quote = quoteRes.data;
     if (!quote?.success) {
-      console.error("クォート失敗:", quote?.msg);
+      console.log(`Raydiumルートなし: ${quote?.msg}`);
       return null;
     }
+    console.log(`Raydiumルート確認OK: ${quote?.data?.outputAmount}`);
+    return quote;
+  } catch (error) {
+    console.error("ルートチェックエラー:", error.message);
+    return null;
+  }
+}
 
-    console.log("取得予定数量:", quote?.data?.outputAmount);
+async function buyToken(tokenMint, solPriceUsd, isPumpFun = false) {
+  console.log("SOL購入開始:", tokenMint);
+  try {
+    const wallet = getWallet();
+    const connection = getConnection();
+    const lamports = await usdToLamports(TRADE_CONFIG.BUY_AMOUNT_USD, solPriceUsd);
+    console.log(`買い金額: $${TRADE_CONFIG.BUY_AMOUNT_USD} = ${lamports} lamports`);
+
+    // 購入前にRaydiumルートを確認
+    const quote = await checkRaydiumRoute(tokenMint, lamports);
+    if (!quote) {
+      console.log("Raydiumルートなし → 購入スキップ");
+      return null;
+    }
 
     const txRes = await axios.post(TRADE_CONFIG.RAYDIUM_TX_API, {
       computeUnitPriceMicroLamports: "100000",
