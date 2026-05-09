@@ -49,8 +49,29 @@ app.get("/status", (req, res) => {
   });
 });
 
-app.get("/history", (req, res) => {
-  res.json({ history: tradeHistory });
+app.get("/history", async (req, res) => {
+  try {
+    const { loadHistoryFromSupabase } = require("./portfolio");
+    const supabaseHistory = await loadHistoryFromSupabase();
+
+    if (supabaseHistory.length > 0) {
+      const formatted = supabaseHistory.map(h => ({
+        id: h.id,
+        symbol: h.symbol,
+        type: h.type,
+        amount: parseFloat(h.amount || 0),
+        profit: h.profit !== null ? parseFloat(h.profit) : null,
+        reason: h.reason,
+        txid: h.txid,
+        timestamp: new Date(h.created_at).toLocaleTimeString("ja-JP", { timeZone: "Asia/Tokyo" }),
+      }));
+      res.json({ history: formatted });
+    } else {
+      res.json({ history: tradeHistory });
+    }
+  } catch (e) {
+    res.json({ history: tradeHistory });
+  }
 });
 
 app.post("/config", (req, res) => {
@@ -64,16 +85,15 @@ app.post("/config", (req, res) => {
   res.json({ success: true, config: botConfig });
 });
 
-// 手動購入エンドポイント
 app.post("/manual-buy", async (req, res) => {
   try {
-    const { tokenAddress, symbol } = req.body;
+    const { tokenAddress, symbol, takeProfit, stopLoss, amount } = req.body;
     if (!tokenAddress) {
       return res.status(400).json({ success: false, error: "tokenAddressが必要です" });
     }
 
     const { getSolanaPrice } = require("./priceChecker");
-    const { buyToken } = require("./trader");
+    const { buyToken, TRADE_CONFIG } = require("./trader");
     const { addPosition, positions } = require("./portfolio");
 
     if (positions.length >= 1) {
@@ -85,16 +105,24 @@ app.post("/manual-buy", async (req, res) => {
       return res.status(500).json({ success: false, error: "SOL価格取得失敗" });
     }
 
+    // 購入金額を一時的に変更
+    const originalAmount = TRADE_CONFIG.BUY_AMOUNT_USD;
+    if (amount) TRADE_CONFIG.BUY_AMOUNT_USD = parseFloat(amount);
+
     console.log("手動購入開始:", tokenAddress);
     const tradeResult = await buyToken(tokenAddress, priceData.price, false);
+
+    TRADE_CONFIG.BUY_AMOUNT_USD = originalAmount;
 
     if (!tradeResult) {
       return res.status(500).json({ success: false, error: "購入失敗（ルートなしまたは残高不足）" });
     }
 
     tradeResult.symbol = symbol || tokenAddress.substring(0, 8);
-    addPosition(tradeResult);
+    tradeResult.takeProfit = takeProfit || botConfig.takeProfit;
+    tradeResult.stopLoss = stopLoss || botConfig.stopLoss;
 
+    addPosition(tradeResult);
     addTradeHistory({
       symbol: tradeResult.symbol,
       type: "buy",
@@ -103,6 +131,18 @@ app.post("/manual-buy", async (req, res) => {
       reason: "手動購入",
       txid: tradeResult.txid,
     });
+
+    const { saveHistoryToSupabase } = require("./portfolio");
+    if (saveHistoryToSupabase) {
+      await saveHistoryToSupabase({
+        symbol: tradeResult.symbol,
+        type: "buy",
+        amount: tradeResult.buyAmountUsd,
+        profit: null,
+        reason: "手動購入",
+        txid: tradeResult.txid,
+      });
+    }
 
     console.log("手動購入成功:", tradeResult.txid);
     res.json({ success: true, txid: tradeResult.txid });
@@ -113,10 +153,9 @@ app.post("/manual-buy", async (req, res) => {
   }
 });
 
-// 手動売却エンドポイント
 app.post("/manual-sell", async (req, res) => {
   try {
-    const { positions } = require("./portfolio");
+    const { positions, removePosition } = require("./portfolio");
     const { sellToken } = require("./trader");
 
     if (positions.length === 0) {
@@ -141,10 +180,19 @@ app.post("/manual-sell", async (req, res) => {
       txid: result.txid,
     });
 
-    const { removePosition } = require("./portfolio");
-    // portfolio.jsのremovePositionを使う
-    const idx = positions.findIndex(p => p.tokenMint === position.tokenMint);
-    if (idx !== -1) positions.splice(idx, 1);
+    const { saveHistoryToSupabase } = require("./portfolio");
+    if (saveHistoryToSupabase) {
+      await saveHistoryToSupabase({
+        symbol: position.symbol || "不明",
+        type: "sell",
+        amount: position.buyAmountUsd,
+        profit: null,
+        reason: "手動売却",
+        txid: result.txid,
+      });
+    }
+
+    removePosition(position.tokenMint);
 
     console.log("手動売却成功:", result.txid);
     res.json({ success: true, txid: result.txid });
