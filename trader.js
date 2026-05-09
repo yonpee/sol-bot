@@ -47,7 +47,7 @@ async function ensureTokenAccount(connection, wallet, mintAddress) {
     const info = await connection.getAccountInfo(ata);
     if (info) {
       console.log("トークンアカウントOK");
-      return true;
+      return ata;
     }
     console.log("トークンアカウント作成中...");
     const ix = createAssociatedTokenAccountInstruction(
@@ -64,10 +64,10 @@ async function ensureTokenAccount(connection, wallet, mintAddress) {
     });
     await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight });
     console.log("トークンアカウント作成完了!");
-    return true;
+    return ata;
   } catch (error) {
     console.error("トークンアカウント作成エラー:", error.message);
-    return false;
+    return null;
   }
 }
 
@@ -88,7 +88,7 @@ async function checkRaydiumRoute(tokenMint, lamports) {
       console.log("Raydiumルートなし: " + quote?.msg);
       return null;
     }
-    console.log("Raydiumルート確認OK: " + quote?.data?.outputAmount);
+    console.log("Raydiumルート確認OK outputAmount:" + quote?.data?.outputAmount + " decimals:" + quote?.data?.outputDecimals);
     return quote;
   } catch (error) {
     console.error("ルートチェックエラー:", error.message);
@@ -104,7 +104,6 @@ async function buyToken(tokenMint, solPriceUsd, isPumpFun = false) {
     const lamports = await usdToLamports(TRADE_CONFIG.BUY_AMOUNT_USD, solPriceUsd);
     console.log("買い金額: $" + TRADE_CONFIG.BUY_AMOUNT_USD + " = " + lamports + " lamports");
 
-    // 購入前にトークンアカウントを作成
     await ensureTokenAccount(connection, wallet, tokenMint);
 
     const quote = await checkRaydiumRoute(tokenMint, lamports);
@@ -141,17 +140,22 @@ async function buyToken(tokenMint, solPriceUsd, isPumpFun = false) {
       console.log("購入成功! TX:", txid);
     }
 
-    const outputAmount = parseFloat(quote?.data?.outputAmount || 1);
+    // デシマルを考慮したbuyPrice計算
+    const outputAmountRaw = parseFloat(quote?.data?.outputAmount || 1);
+    const outputDecimals = parseFloat(quote?.data?.outputDecimals || 6);
+    const outputAmount = outputAmountRaw / Math.pow(10, outputDecimals);
     const inputAmountSol = lamports / LAMPORTS_PER_SOL;
     const buyPriceInSol = inputAmountSol / outputAmount;
     const buyPriceUsd = buyPriceInSol * solPriceUsd;
-    console.log("購入価格: $" + buyPriceUsd.toFixed(8) + " per token");
+
+    console.log("購入数量: " + outputAmount.toFixed(4) + " tokens");
+    console.log("購入価格: $" + buyPriceUsd.toFixed(6) + " per token");
 
     return {
       txid, tokenMint,
       buyAmountUsd: TRADE_CONFIG.BUY_AMOUNT_USD,
       buyPrice: buyPriceUsd,
-      tokenAmount: outputAmount,
+      tokenAmount: outputAmountRaw,
       timestamp: Date.now(),
       isPumpFun: false,
     };
@@ -167,7 +171,6 @@ async function sellToken(position, currentPrice, reason) {
     const wallet = getWallet();
     const connection = getConnection();
 
-    // 売却前にトークンアカウントを確認・作成
     await ensureTokenAccount(connection, wallet, position.tokenMint);
 
     const quoteRes = await axios.get(TRADE_CONFIG.RAYDIUM_SWAP_API, {
