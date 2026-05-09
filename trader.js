@@ -31,7 +31,6 @@ async function usdToLamports(usdAmount, solPriceUsd) {
   return Math.floor((usdAmount / solPriceUsd) * LAMPORTS_PER_SOL);
 }
 
-// Raydiumのルートが存在するか事前チェック
 async function checkRaydiumRoute(tokenMint, lamports) {
   try {
     const quoteRes = await axios.get(TRADE_CONFIG.RAYDIUM_SWAP_API, {
@@ -46,10 +45,10 @@ async function checkRaydiumRoute(tokenMint, lamports) {
     });
     const quote = quoteRes.data;
     if (!quote?.success) {
-      console.log(`Raydiumルートなし: ${quote?.msg}`);
+      console.log("Raydiumルートなし: " + quote?.msg);
       return null;
     }
-    console.log(`Raydiumルート確認OK: ${quote?.data?.outputAmount}`);
+    console.log("Raydiumルート確認OK: " + quote?.data?.outputAmount);
     return quote;
   } catch (error) {
     console.error("ルートチェックエラー:", error.message);
@@ -63,9 +62,8 @@ async function buyToken(tokenMint, solPriceUsd, isPumpFun = false) {
     const wallet = getWallet();
     const connection = getConnection();
     const lamports = await usdToLamports(TRADE_CONFIG.BUY_AMOUNT_USD, solPriceUsd);
-    console.log(`買い金額: $${TRADE_CONFIG.BUY_AMOUNT_USD} = ${lamports} lamports`);
+    console.log("買い金額: $" + TRADE_CONFIG.BUY_AMOUNT_USD + " = " + lamports + " lamports");
 
-    // 購入前にRaydiumルートを確認
     const quote = await checkRaydiumRoute(tokenMint, lamports);
     if (!quote) {
       console.log("Raydiumルートなし → 購入スキップ");
@@ -100,11 +98,20 @@ async function buyToken(tokenMint, solPriceUsd, isPumpFun = false) {
       console.log("購入成功! TX:", txid);
     }
 
+    // buyPriceをSOL建てで正しく計算
+    const outputAmount = parseFloat(quote?.data?.outputAmount || 1);
+    const inputAmountSol = lamports / LAMPORTS_PER_SOL;
+    const buyPriceInSol = inputAmountSol / outputAmount;
+    const buyPriceUsd = buyPriceInSol * solPriceUsd;
+
+    console.log("購入価格: $" + buyPriceUsd.toFixed(8) + " per token");
+
     return {
-      txid, tokenMint,
+      txid,
+      tokenMint,
       buyAmountUsd: TRADE_CONFIG.BUY_AMOUNT_USD,
-      buyPrice: lamports / parseFloat(quote?.data?.outputAmount || 1),
-      tokenAmount: parseFloat(quote?.data?.outputAmount || 0),
+      buyPrice: buyPriceUsd,
+      tokenAmount: outputAmount,
       timestamp: Date.now(),
       isPumpFun: false,
     };
@@ -115,7 +122,7 @@ async function buyToken(tokenMint, solPriceUsd, isPumpFun = false) {
 }
 
 async function sellToken(position, currentPrice, reason) {
-  console.log(`売り注文: ${position.tokenMint} (${reason})`);
+  console.log("売り注文: " + position.tokenMint + " (" + reason + ")");
   try {
     const wallet = getWallet();
     const connection = getConnection();
