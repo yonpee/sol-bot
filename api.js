@@ -2,7 +2,13 @@ const express = require("express");
 const cors = require("cors");
 
 const app = express();
-app.use(cors());
+
+app.use(cors({
+  origin: "*",
+  methods: ["GET", "POST", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+}));
+
 app.use(express.json());
 
 let tradeHistory = [];
@@ -14,7 +20,6 @@ let botConfig = {
   active: true,
 };
 
-// 取引履歴に追加する関数
 function addTradeHistory(trade) {
   tradeHistory.unshift({
     id: Date.now(),
@@ -26,11 +31,15 @@ function addTradeHistory(trade) {
     txid: trade.txid || "",
     timestamp: new Date().toLocaleTimeString("ja-JP", { timeZone: "Asia/Tokyo" }),
   });
-  // 最大50件まで保存
   if (tradeHistory.length > 50) tradeHistory.pop();
 }
 
-// Bot状態を取得
+app.options("*", cors());
+
+app.get("/health", (req, res) => {
+  res.json({ status: "ok", timestamp: Date.now() });
+});
+
 app.get("/status", (req, res) => {
   const { positions } = require("./portfolio");
   res.json({
@@ -41,12 +50,10 @@ app.get("/status", (req, res) => {
   });
 });
 
-// 取引履歴を取得
 app.get("/history", (req, res) => {
   res.json({ history: tradeHistory });
 });
 
-// 設定を変更
 app.post("/config", (req, res) => {
   const { takeProfit, stopLoss, buyAmount, minChange5m, active } = req.body;
   if (takeProfit !== undefined) botConfig.takeProfit = parseFloat(takeProfit);
@@ -54,18 +61,13 @@ app.post("/config", (req, res) => {
   if (buyAmount !== undefined) botConfig.buyAmount = parseFloat(buyAmount);
   if (minChange5m !== undefined) botConfig.minChange5m = parseFloat(minChange5m);
   if (active !== undefined) botConfig.active = active;
-  console.log("設定変更:", botConfig);
+  console.log("設定変更:", JSON.stringify(botConfig));
   res.json({ success: true, config: botConfig });
-});
-
-// ヘルスチェック
-app.get("/health", (req, res) => {
-  res.json({ status: "ok", timestamp: Date.now() });
 });
 
 function startApi() {
   const PORT = process.env.PORT || 3000;
-  app.listen(PORT, () => {
+  app.listen(PORT, "0.0.0.0", () => {
     console.log("API サーバー起動: port " + PORT);
   });
 }
