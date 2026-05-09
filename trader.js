@@ -70,7 +70,7 @@ async function usdToLamports(usdAmount, solPriceUsd) {
   return Math.floor((usdAmount / solPriceUsd) * LAMPORTS_PER_SOL);
 }
 
-async function ensureTokenAccount(connection, wallet, mintAddress) {
+async function getOrCreateTokenAccount(connection, wallet, mintAddress) {
   try {
     const mint = new PublicKey(mintAddress);
     const ata = await getAssociatedTokenAddress(
@@ -79,7 +79,7 @@ async function ensureTokenAccount(connection, wallet, mintAddress) {
     );
     const info = await connection.getAccountInfo(ata);
     if (info) {
-      console.log("トークンアカウントOK");
+      console.log("トークンアカウントOK: " + ata.toString());
       return ata;
     }
     console.log("トークンアカウント作成中...");
@@ -96,13 +96,11 @@ async function ensureTokenAccount(connection, wallet, mintAddress) {
       skipPreflight: false,
     });
     await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight });
-    console.log("トークンアカウント作成完了!");
-
-    // アカウント確定を待機
+    console.log("トークンアカウント作成完了: " + ata.toString());
     await new Promise(r => setTimeout(r, 3000));
     return ata;
   } catch (error) {
-    console.error("トークンアカウント作成エラー:", error.message);
+    console.error("トークンアカウントエラー:", error.message);
     return null;
   }
 }
@@ -140,7 +138,11 @@ async function buyToken(tokenMint, solPriceUsd, isPumpFun = false) {
     const lamports = await usdToLamports(TRADE_CONFIG.BUY_AMOUNT_USD, solPriceUsd);
     console.log("買い金額: $" + TRADE_CONFIG.BUY_AMOUNT_USD + " = " + lamports + " lamports");
 
-    await ensureTokenAccount(connection, wallet, tokenMint);
+    const ata = await getOrCreateTokenAccount(connection, wallet, tokenMint);
+    if (!ata) {
+      console.error("トークンアカウント取得失敗");
+      return null;
+    }
 
     const quote = await checkRaydiumRoute(tokenMint, lamports);
     if (!quote) {
@@ -209,14 +211,20 @@ async function sellToken(position, currentPrice, reason) {
     const wallet = getWallet();
     const connection = getConnection();
 
-    await ensureTokenAccount(connection, wallet, position.tokenMint);
+    // トークンアカウントのATAアドレスを取得
+    const ata = await getOrCreateTokenAccount(connection, wallet, position.tokenMint);
+    if (!ata) {
+      console.error("トークンアカウント取得失敗");
+      return null;
+    }
 
-    // 売却前に2秒待機してアカウントを確定
-    await new Promise(r => setTimeout(r, 2000));
+    console.log("売却元ATA: " + ata.toString());
 
     // 3回リトライ
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
+        await new Promise(r => setTimeout(r, 1000));
+
         const quoteRes = await axios.get(TRADE_CONFIG.RAYDIUM_SWAP_API, {
           params: {
             inputMint: position.tokenMint,
@@ -231,7 +239,7 @@ async function sellToken(position, currentPrice, reason) {
         const quote = quoteRes.data;
         if (!quote?.success) {
           console.error("売りクォート失敗(" + attempt + "):", quote?.msg);
-          if (attempt < 3) await new Promise(r => setTimeout(r, 2000));
+          await new Promise(r => setTimeout(r, 2000));
           continue;
         }
 
@@ -240,19 +248,21 @@ async function sellToken(position, currentPrice, reason) {
           swapResponse: quote,
           txVersion: "V0",
           wallet: wallet.publicKey.toString(),
+          inputAccount: ata.toString(),
           wrapSol: true,
           unwrapSol: true,
         }, { timeout: 15000 });
 
         if (!txRes.data?.success) {
           console.error("売りトランザクション失敗(" + attempt + "):", txRes.data?.msg);
-          if (attempt < 3) await new Promise(r => setTimeout(r, 2000));
+          await new Promise(r => setTimeout(r, 2000));
           continue;
         }
 
         const transactions = txRes.data?.data;
-        let txid = null;
+        if (!transactions || transactions.length === 0) continue;
 
+        let txid = null;
         for (const txData of transactions) {
           const buf = Buffer.from(txData.transaction, "base64");
           const tx = VersionedTransaction.deserialize(buf);
@@ -267,7 +277,7 @@ async function sellToken(position, currentPrice, reason) {
 
       } catch (e) {
         console.error("売却試行" + attempt + "エラー:", e.message);
-        if (attempt < 3) await new Promise(r => setTimeout(r, 2000));
+        await new Promise(r => setTimeout(r, 2000));
       }
     }
 
