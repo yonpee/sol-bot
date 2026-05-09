@@ -3,7 +3,7 @@ const cron = require("node-cron");
 const { getSolanaPrice } = require("./priceChecker");
 const { sendDiscordNotification } = require("./notifier");
 const { checkTrends } = require("./trendScanner");
-const { monitorPositions, loadPositionFromEnv } = require("./portfolio");
+const { monitorPositions, loadPositionFromSupabase } = require("./portfolio");
 const { startApi } = require("./api");
 
 const CONFIG = {
@@ -70,7 +70,9 @@ async function checkPrice() {
 async function startBot() {
   console.log("Solana Trade Bot 起動中...");
   checkEnvironmentVariables();
-  loadPositionFromEnv();
+
+  // Supabaseからポジションを復元
+  await loadPositionFromSupabase();
 
   // APIサーバー起動
   startApi();
