@@ -69,8 +69,6 @@ async function checkPrice() {
 async function startBot() {
   console.log("Solana Trade Bot 起動中...");
   checkEnvironmentVariables();
-
-  // 起動時にポジションを復元
   loadPositionFromEnv();
 
   const priceData = await checkPrice();
@@ -79,7 +77,6 @@ async function startBot() {
     await monitorPositions();
   }
 
-  // 2分ごとにチェック（レート制限対策）
   cron.schedule(`*/${CONFIG.CHECK_INTERVAL_MINUTES} * * * *`, async () => {
     const pd = await checkPrice();
     if (pd) {
