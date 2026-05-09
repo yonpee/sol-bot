@@ -6,42 +6,12 @@
   <title>⚡ SOL Bot Dashboard</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      background: #080c14;
-      color: #e2e8f0;
-      font-family: 'DM Mono', 'Courier New', monospace;
-      padding-bottom: 80px;
-    }
-    .header {
-      background: linear-gradient(180deg, #0d1421 0%, #080c14 100%);
-      border-bottom: 1px solid #1a2540;
-      padding: 16px 20px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      position: sticky;
-      top: 0;
-      z-index: 100;
-    }
+    body { background: #080c14; color: #e2e8f0; font-family: 'DM Mono', 'Courier New', monospace; padding-bottom: 80px; }
+    .header { background: linear-gradient(180deg, #0d1421 0%, #080c14 100%); border-bottom: 1px solid #1a2540; padding: 16px 20px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100; }
     .logo { font-size: 16px; font-weight: 700; color: #38bdf8; letter-spacing: 0.1em; text-transform: uppercase; }
     .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
-    .status-text { font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; }
-    .tabs {
-      display: flex;
-      background: #0d1421;
-      border-bottom: 1px solid #1a2540;
-      position: sticky;
-      top: 57px;
-      z-index: 99;
-    }
-    .tab {
-      flex: 1; padding: 12px; text-align: center;
-      font-size: 11px; font-weight: 700; letter-spacing: 0.1em;
-      text-transform: uppercase; cursor: pointer;
-      color: #475569; border-bottom: 2px solid transparent;
-      background: none; border-top: none; border-left: none; border-right: none;
-      font-family: inherit;
-    }
+    .tabs { display: flex; background: #0d1421; border-bottom: 1px solid #1a2540; position: sticky; top: 57px; z-index: 99; }
+    .tab { flex: 1; padding: 12px; text-align: center; font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; cursor: pointer; color: #475569; border-bottom: 2px solid transparent; background: none; border-top: none; border-left: none; border-right: none; font-family: inherit; }
     .tab.active { color: #38bdf8; border-bottom: 2px solid #38bdf8; }
     .section { padding: 16px 20px 0; }
     .section-title { font-size: 10px; color: #475569; text-transform: uppercase; letter-spacing: 0.15em; margin-bottom: 12px; }
@@ -58,19 +28,14 @@
     .btn { background: #1d4ed8; border: none; border-radius: 10px; color: #fff; font-size: 13px; font-weight: 700; padding: 12px 20px; cursor: pointer; width: 100%; letter-spacing: 0.05em; margin-top: 8px; font-family: inherit; }
     .btn-danger { background: #7f1d1d !important; color: #ef4444 !important; border: 1px solid #ef4444 !important; }
     .btn-success { background: #166534 !important; color: #22c55e !important; border: 1px solid #22c55e !important; }
-    .btn-warning { background: #78350f !important; color: #f59e0b !important; border: 1px solid #f59e0b !important; }
-    .btn-half { width: calc(50% - 4px); margin-top: 8px; }
     .refresh-btn { background: none; border: 1px solid #1a2540; border-radius: 8px; color: #475569; font-size: 11px; padding: 6px 12px; cursor: pointer; font-family: inherit; }
     .error-box { background: #1a0a0a; border: 1px solid #7f1d1d; border-radius: 8px; padding: 12px; color: #ef4444; font-size: 12px; margin-bottom: 12px; }
     .success-box { background: #0a1a0a; border: 1px solid #166534; border-radius: 8px; padding: 12px; color: #22c55e; font-size: 12px; margin-bottom: 12px; }
     .history-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #1a2540; }
     .badge { font-size: 10px; padding: 2px 6px; border-radius: 4px; font-weight: 700; }
-    input[type=number], input[type=text] {
-      background: #1a2540; border: 1px solid #2d3f60; border-radius: 8px;
-      color: #e2e8f0; font-size: 14px; padding: 8px 12px;
-      width: 100%; outline: none; font-family: inherit; margin-top: 6px;
-    }
+    input[type=number], input[type=text] { background: #1a2540; border: 1px solid #2d3f60; border-radius: 8px; color: #e2e8f0; font-size: 14px; padding: 8px 12px; width: 100%; outline: none; font-family: inherit; margin-top: 6px; }
     input[type=number].small { width: 80px; margin-top: 0; }
+    select { background: #1a2540; border: 1px solid #2d3f60; border-radius: 8px; color: #e2e8f0; font-size: 14px; padding: 10px 12px; width: 100%; outline: none; font-family: inherit; margin-top: 6px; appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2364748b' d='M6 8L1 3h10z'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; }
     .tab-content { display: none; }
     .tab-content.active { display: block; }
     a { color: #38bdf8; text-decoration: none; }
@@ -79,9 +44,8 @@
     .pos-item-label { font-size: 10px; color: #475569; }
     .pos-item-value { font-size: 13px; font-weight: 700; color: #38bdf8; margin-top: 4px; }
     .input-group { margin-bottom: 12px; }
-    .input-label { font-size: 11px; color: #475569; margin-bottom: 4px; }
-    .btn-row { display: flex; gap: 8px; }
-    .loading { opacity: 0.5; pointer-events: none; }
+    .input-label { font-size: 11px; color: #475569; margin-bottom: 2px; }
+    .token-preview { background: #1a2540; border-radius: 8px; padding: 10px; margin-top: 8px; font-size: 11px; color: #64748b; display: none; }
   </style>
 </head>
 <body>
@@ -91,27 +55,23 @@
   <div style="display:flex;align-items:center;gap:12px">
     <span>
       <span class="status-dot" id="statusDot" style="background:#64748b"></span>
-      <span class="status-text" id="statusText" style="color:#64748b">接続中...</span>
+      <span style="font-size:11px;text-transform:uppercase;letter-spacing:0.1em" id="statusText" style="color:#64748b">接続中...</span>
     </span>
     <button class="refresh-btn" onclick="fetchAll()">🔄</button>
   </div>
 </div>
 
 <div class="tabs">
-  <button class="tab active" onclick="switchTab('dashboard', this)">📊 概要</button>
-  <button class="tab" onclick="switchTab('trade', this)">🛒 売買</button>
-  <button class="tab" onclick="switchTab('settings', this)">⚙️ 設定</button>
-  <button class="tab" onclick="switchTab('history', this)">📋 履歴</button>
+  <button class="tab active" onclick="switchTab('dashboard',this)">📊 概要</button>
+  <button class="tab" onclick="switchTab('trade',this)">🛒 売買</button>
+  <button class="tab" onclick="switchTab('settings',this)">⚙️ 設定</button>
+  <button class="tab" onclick="switchTab('history',this)">📋 履歴</button>
 </div>
 
-<div id="errorBox" style="padding:12px 20px 0;display:none">
-  <div class="error-box" id="errorMsg"></div>
-</div>
-<div id="successBox" style="padding:12px 20px 0;display:none">
-  <div class="success-box" id="successMsg"></div>
-</div>
+<div id="errorBox" style="padding:12px 20px 0;display:none"><div class="error-box" id="errorMsg"></div></div>
+<div id="successBox" style="padding:12px 20px 0;display:none"><div class="success-box" id="successMsg"></div></div>
 
-<!-- Dashboard Tab -->
+<!-- Dashboard -->
 <div id="tab-dashboard" class="tab-content active">
   <div class="section">
     <div class="section-title">損益サマリー</div>
@@ -140,9 +100,7 @@
         <span style="font-size:12px;color:#64748b">進捗</span>
         <span style="font-size:12px;color:#38bdf8;font-weight:700" id="progressPct">0%</span>
       </div>
-      <div class="progress-bar">
-        <div class="progress-fill" id="progressFill" style="width:0%"></div>
-      </div>
+      <div class="progress-bar"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
       <div style="display:flex;justify-content:space-between;margin-top:6px">
         <span style="font-size:10px;color:#475569" id="progressCurrent">現在: $30.00</span>
         <span style="font-size:10px;color:#475569">目標: $40.00</span>
@@ -151,12 +109,10 @@
 
     <div class="section-title">現在のポジション (<span id="posCountBadge">0</span>件)</div>
     <div id="positionCardDash">
-      <div class="card">
-        <div style="text-align:center;color:#475569;font-size:13px;padding:12px">現在ポジションなし</div>
-      </div>
+      <div class="card"><div style="text-align:center;color:#475569;font-size:13px;padding:12px">現在ポジションなし</div></div>
     </div>
 
-    <div class="section-title">Bot設定</div>
+    <div class="section-title">Bot設定（現在値）</div>
     <div class="card">
       <div class="setting-row"><span class="setting-label">利確ライン</span><span class="setting-value" id="cfgTakeProfit">+8%</span></div>
       <div class="setting-row"><span class="setting-label">損切りライン</span><span class="setting-value" id="cfgStopLoss">-4%</span></div>
@@ -164,25 +120,59 @@
       <div class="setting-row" style="border:none"><span class="setting-label">購入条件</span><span class="setting-value" id="cfgMinChange">5分で+1%以上</span></div>
     </div>
 
-    <button class="btn" id="toggleBtn" onclick="toggleBot()">⏸ Bot を停止する</button>
+    <button class="btn btn-danger" id="toggleBtn" onclick="toggleBot()">⏸ Bot を停止する</button>
   </div>
 </div>
 
-<!-- Trade Tab -->
+<!-- Trade -->
 <div id="tab-trade" class="tab-content">
   <div class="section">
 
     <div class="section-title">手動購入</div>
     <div class="card">
       <div class="input-group">
-        <div class="input-label">トークンアドレス</div>
-        <input type="text" id="buyTokenAddress" placeholder="例: JUPyiwrYJFskUPiHa7hk...">
+        <div class="input-label">トークンを選択</div>
+        <select id="tokenSelect" onchange="onTokenSelect()">
+          <option value="">-- トークンを選択 --</option>
+          <optgroup label="DeFiコイン">
+            <option value="JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN|JUP">JUP (Jupiter)</option>
+            <option value="4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R|RAY">RAY (Raydium)</option>
+            <option value="HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3|PYTH">PYTH (Pyth Network)</option>
+            <option value="orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE|ORCA">ORCA (Orca)</option>
+            <option value="DriFtupJYLTosbwoN8koMbEYSx54aFAVLddWsbksjwg7|DRIFT">DRIFT (Drift)</option>
+            <option value="rndrizKT3MK1iimdxRdWabcF7Zg7AR5T4nud4EkHBof|RENDER">RENDER (Render)</option>
+          </optgroup>
+          <optgroup label="ミームコイン">
+            <option value="DezXAZ8z7PnrnRJjz3wXBoRgiqCmbVeDbroIkLbCk5|BONK">BONK</option>
+            <option value="EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm|WIF">WIF (dogwifhat)</option>
+            <option value="MEW1gQWJ3nEXg2qgERiKu7FAFj79PHvQVREQUzScPP5|MEW">MEW</option>
+            <option value="ukHH6c7mMyiWCf1b9pnWe25TSpkDDt3H5pQZgZ74J82|BOME">BOME</option>
+            <option value="7BgBvyjrZX1YKz4oh9mjb8ZScatkkwb8DzFx7LoiVkM3|SLERF">SLERF</option>
+          </optgroup>
+          <optgroup label="AIコイン">
+            <option value="HeLp6NuQkmYB4pYWo2zYs22mESHXPQYzXbB8n4V98jwC|AI16Z">AI16Z</option>
+            <option value="8x5VqbHA8D7NkD52uNuS5nnt3PwA8pLD34ymskeSo2Wn|ZEREBRO">ZEREBRO</option>
+          </optgroup>
+          <optgroup label="その他（アドレスを直接入力）">
+            <option value="custom">カスタム入力...</option>
+          </optgroup>
+        </select>
       </div>
-      <div class="input-group">
-        <div class="input-label">シンボル（任意）</div>
-        <input type="text" id="buyTokenSymbol" placeholder="例: JUP">
+
+      <div id="customAddressGroup" style="display:none">
+        <div class="input-group">
+          <div class="input-label">トークンアドレス</div>
+          <input type="text" id="buyTokenAddress" placeholder="例: JUPyiwrYJFskUPiHa7hk...">
+        </div>
+        <div class="input-group">
+          <div class="input-label">シンボル</div>
+          <input type="text" id="buyTokenSymbol" placeholder="例: JUP">
+        </div>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+
+      <div id="tokenPreview" class="token-preview"></div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px">
         <div class="input-group">
           <div class="input-label">利確ライン (%)</div>
           <input type="number" id="buyTakeProfit" value="8" step="0.5">
@@ -196,24 +186,17 @@
         <div class="input-label">購入金額 ($)</div>
         <input type="number" id="buyAmount" value="10" step="1">
       </div>
+
+      <div style="background:#1a2540;border-radius:8px;padding:10px;margin-top:4px;font-size:11px;color:#64748b">
+        ⚠️ この設定はこの注文のみに適用されます
+      </div>
+
       <button class="btn" onclick="manualBuy()" id="buyBtn">🛒 購入する</button>
     </div>
 
-    <div class="section-title">クイック購入（有名コイン）</div>
-    <div class="card">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-        <button class="refresh-btn" style="width:100%;padding:10px" onclick="quickBuy('JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN','JUP')">JUP</button>
-        <button class="refresh-btn" style="width:100%;padding:10px" onclick="quickBuy('4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R','RAY')">RAY</button>
-        <button class="refresh-btn" style="width:100%;padding:10px" onclick="quickBuy('DezXAZ8z7PnrnRJjz3wXBoRgiqCmbVeDbroIkLbCk5','BONK')">BONK</button>
-        <button class="refresh-btn" style="width:100%;padding:10px" onclick="quickBuy('EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm','WIF')">WIF</button>
-        <button class="refresh-btn" style="width:100%;padding:10px" onclick="quickBuy('MEW1gQWJ3nEXg2qgERiKu7FAFj79PHvQVREQUzScPP5','MEW')">MEW</button>
-        <button class="refresh-btn" style="width:100%;padding:10px" onclick="quickBuy('HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3','PYTH')">PYTH</button>
-      </div>
-    </div>
-
     <div class="section-title">手動売却</div>
-    <div class="card" id="sellCard">
-      <div style="text-align:center;color:#475569;font-size:13px;padding:12px" id="sellNoPosition">
+    <div class="card">
+      <div id="sellNoPosition" style="text-align:center;color:#475569;font-size:13px;padding:12px">
         ポジションがありません
       </div>
       <div id="sellPositionInfo" style="display:none">
@@ -225,22 +208,22 @@
   </div>
 </div>
 
-<!-- Settings Tab -->
+<!-- Settings -->
 <div id="tab-settings" class="tab-content">
   <div class="section">
-    <div class="section-title">自動売買設定（デフォルト）</div>
+    <div class="section-title">自動売買設定</div>
     <div class="card">
       <div class="setting-row">
         <span class="setting-label">利確ライン (%)</span>
-        <input type="number" class="small" id="inputTakeProfit" value="8" step="0.5">
+        <input type="number" class="small" id="inputTakeProfit" value="8" step="0.5" oninput="updateRiskCalc()">
       </div>
       <div class="setting-row">
         <span class="setting-label">損切りライン (%)</span>
-        <input type="number" class="small" id="inputStopLoss" value="-4" step="0.5">
+        <input type="number" class="small" id="inputStopLoss" value="-4" step="0.5" oninput="updateRiskCalc()">
       </div>
       <div class="setting-row">
         <span class="setting-label">購入金額 ($)</span>
-        <input type="number" class="small" id="inputBuyAmount" value="10" step="1">
+        <input type="number" class="small" id="inputBuyAmount" value="10" step="1" oninput="updateRiskCalc()">
       </div>
       <div class="setting-row" style="border:none">
         <span class="setting-label">購入条件 5分変化 (%)</span>
@@ -248,11 +231,11 @@
       </div>
     </div>
     <p style="font-size:11px;color:#475569;margin-bottom:12px;line-height:1.6">
-      ⚠️ 保存するとBotの自動売買に即時反映されます。手動注文時は別途設定できます。
+      ⚠️ 保存するとBotの自動売買に即時反映されます。
     </p>
     <button class="btn" onclick="saveConfig()">💾 Botに反映する</button>
 
-    <div class="section-title" style="margin-top:20px">リスク管理</div>
+    <div class="section-title" style="margin-top:20px">リスク管理（自動計算）</div>
     <div class="card">
       <div class="setting-row"><span class="setting-label">リスクリワード比</span><span class="setting-value" id="riskReward">1:2.0</span></div>
       <div class="setting-row"><span class="setting-label">必要勝率</span><span class="setting-value" id="reqWinRate">34%以上</span></div>
@@ -262,7 +245,7 @@
   </div>
 </div>
 
-<!-- History Tab -->
+<!-- History -->
 <div id="tab-history" class="tab-content">
   <div class="section">
     <div style="display:flex;justify-content:space-between;align-items:center">
@@ -284,6 +267,22 @@ const API_BASE = "https://sol-bot-production-5176.up.railway.app";
 let botActive = true;
 let historyData = [];
 let currentPositions = [];
+
+const TOKEN_MAP = {
+  "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN": "JUP",
+  "4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R": "RAY",
+  "HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3": "PYTH",
+  "orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE": "ORCA",
+  "DriFtupJYLTosbwoN8koMbEYSx54aFAVLddWsbksjwg7": "DRIFT",
+  "rndrizKT3MK1iimdxRdWabcF7Zg7AR5T4nud4EkHBof": "RENDER",
+  "DezXAZ8z7PnrnRJjz3wXBoRgiqCmbVeDbroIkLbCk5": "BONK",
+  "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm": "WIF",
+  "MEW1gQWJ3nEXg2qgERiKu7FAFj79PHvQVREQUzScPP5": "MEW",
+  "ukHH6c7mMyiWCf1b9pnWe25TSpkDDt3H5pQZgZ74J82": "BOME",
+  "7BgBvyjrZX1YKz4oh9mjb8ZScatkkwb8DzFx7LoiVkM3": "SLERF",
+  "HeLp6NuQkmYB4pYWo2zYs22mESHXPQYzXbB8n4V98jwC": "AI16Z",
+  "8x5VqbHA8D7NkD52uNuS5nnt3PwA8pLD34ymskeSo2Wn": "ZEREBRO",
+};
 
 function switchTab(name, el) {
   document.querySelectorAll(".tab-content").forEach(e => e.classList.remove("active"));
@@ -321,6 +320,28 @@ function setStatus(connected, active) {
   }
 }
 
+function onTokenSelect() {
+  const select = document.getElementById("tokenSelect");
+  const val = select.value;
+  const preview = document.getElementById("tokenPreview");
+  const customGroup = document.getElementById("customAddressGroup");
+
+  if (val === "custom") {
+    customGroup.style.display = "block";
+    preview.style.display = "none";
+  } else if (val) {
+    customGroup.style.display = "none";
+    const parts = val.split("|");
+    const address = parts[0];
+    const symbol = parts[1];
+    preview.style.display = "block";
+    preview.innerHTML = "選択中: <strong style='color:#38bdf8'>" + symbol + "</strong><br>" + address.substring(0, 20) + "...";
+  } else {
+    customGroup.style.display = "none";
+    preview.style.display = "none";
+  }
+}
+
 async function fetchStatus() {
   try {
     const res = await fetch(API_BASE + "/status");
@@ -350,7 +371,6 @@ async function fetchStatus() {
       btn.className = "btn btn-success";
     }
 
-    // ポジション表示（概要タブ）
     document.getElementById("posCountBadge").textContent = currentPositions.length;
     if (currentPositions.length > 0) {
       const pos = currentPositions[0];
@@ -359,8 +379,7 @@ async function fetchStatus() {
         '<div class="card" style="border:1px solid #1d4ed8">' +
         '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">' +
         '<span style="font-size:14px;font-weight:700;color:#38bdf8">' + (pos.symbol || "不明") + '</span>' +
-        '<span style="font-size:11px;color:#475569">' + mins + '分保有</span>' +
-        '</div>' +
+        '<span style="font-size:11px;color:#475569">' + mins + '分保有</span></div>' +
         '<div class="pos-grid">' +
         '<div class="pos-item"><div class="pos-item-label">購入金額</div><div class="pos-item-value">$' + (pos.buyAmountUsd || 0) + '</div></div>' +
         '<div class="pos-item"><div class="pos-item-label">利確ライン</div><div class="pos-item-value">+' + (pos.takeProfit || 8) + '%</div></div>' +
@@ -372,12 +391,9 @@ async function fetchStatus() {
         '<div class="card"><div style="text-align:center;color:#475569;font-size:13px;padding:12px">現在ポジションなし</div></div>';
     }
 
-    // 売買タブのポジション表示
     updateSellSection();
-
   } catch (e) {
     setStatus(false, false);
-    showError("Bot APIに接続できません");
   }
 }
 
@@ -499,7 +515,6 @@ async function saveConfig() {
     });
     if (!res.ok) throw new Error("HTTP " + res.status);
     showSuccess("設定をBotに反映しました！");
-    updateRiskCalc();
     await fetchStatus();
   } catch (e) {
     showError("設定保存失敗: " + e.message);
@@ -521,13 +536,22 @@ async function toggleBot() {
 }
 
 async function manualBuy() {
-  const address = document.getElementById("buyTokenAddress").value.trim();
-  const symbol = document.getElementById("buyTokenSymbol").value.trim() || address.substring(0, 8);
-  const takeProfit = parseFloat(document.getElementById("buyTakeProfit").value) || 8;
-  const stopLoss = parseFloat(document.getElementById("buyStopLoss").value) || -4;
+  const select = document.getElementById("tokenSelect");
+  const val = select.value;
+  let tokenAddress = "";
+  let symbol = "";
 
-  if (!address) {
-    showError("トークンアドレスを入力してください");
+  if (val === "custom") {
+    tokenAddress = document.getElementById("buyTokenAddress").value.trim();
+    symbol = document.getElementById("buyTokenSymbol").value.trim() || tokenAddress.substring(0, 8);
+  } else if (val) {
+    const parts = val.split("|");
+    tokenAddress = parts[0];
+    symbol = parts[1];
+  }
+
+  if (!tokenAddress) {
+    showError("トークンを選択またはアドレスを入力してください");
     return;
   }
 
@@ -536,38 +560,32 @@ async function manualBuy() {
     return;
   }
 
+  const takeProfit = parseFloat(document.getElementById("buyTakeProfit").value) || 8;
+  const stopLoss = parseFloat(document.getElementById("buyStopLoss").value) || -4;
+  const amount = parseFloat(document.getElementById("buyAmount").value) || 10;
+
   const btn = document.getElementById("buyBtn");
   btn.textContent = "購入中...";
-  btn.classList.add("loading");
+  btn.disabled = true;
 
   try {
     const res = await fetch(API_BASE + "/manual-buy", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ tokenAddress: address, symbol, takeProfit, stopLoss }),
+      body: JSON.stringify({ tokenAddress, symbol, takeProfit, stopLoss, amount }),
     });
     const data = await res.json();
     if (!data.success) throw new Error(data.error || "購入失敗");
-    showSuccess(symbol + " を購入しました！ TX: " + data.txid.substring(0, 20) + "...");
-    document.getElementById("buyTokenAddress").value = "";
-    document.getElementById("buyTokenSymbol").value = "";
-    await fetchStatus();
+    showSuccess(symbol + " を購入しました！");
+    select.value = "";
+    document.getElementById("tokenPreview").style.display = "none";
+    await fetchAll();
   } catch (e) {
     showError("購入失敗: " + e.message);
   }
 
   btn.textContent = "🛒 購入する";
-  btn.classList.remove("loading");
-}
-
-function quickBuy(address, symbol) {
-  document.getElementById("buyTokenAddress").value = address;
-  document.getElementById("buyTokenSymbol").value = symbol;
-  document.querySelectorAll(".tab").forEach(e => e.classList.remove("active"));
-  document.querySelectorAll(".tab-content").forEach(e => e.classList.remove("active"));
-  document.getElementById("tab-trade").classList.add("active");
-  document.querySelectorAll(".tab")[1].classList.add("active");
-  showSuccess(symbol + " のアドレスをセットしました！設定を確認して購入ボタンを押してください。");
+  btn.disabled = false;
 }
 
 async function manualSell() {
@@ -576,11 +594,9 @@ async function manualSell() {
     return;
   }
 
-  if (!confirm("本当に今すぐ売却しますか？")) return;
-
   const btn = document.getElementById("sellBtn");
   btn.textContent = "売却中...";
-  btn.classList.add("loading");
+  btn.disabled = true;
 
   try {
     const res = await fetch(API_BASE + "/manual-sell", {
@@ -590,23 +606,19 @@ async function manualSell() {
     });
     const data = await res.json();
     if (!data.success) throw new Error(data.error || "売却失敗");
-    showSuccess("売却しました！ TX: " + data.txid.substring(0, 20) + "...");
+    showSuccess("売却しました！ TX: " + data.txid.substring(0, 16) + "...");
     await fetchAll();
   } catch (e) {
     showError("売却失敗: " + e.message);
   }
 
   btn.textContent = "🔴 今すぐ売却する";
-  btn.classList.remove("loading");
+  btn.disabled = false;
 }
 
 async function fetchAll() {
   await Promise.all([fetchStatus(), fetchHistory()]);
 }
-
-["inputTakeProfit", "inputStopLoss", "inputBuyAmount", "inputMinChange"].forEach(id => {
-  document.getElementById(id).addEventListener("input", updateRiskCalc);
-});
 
 fetchAll();
 setInterval(fetchAll, 30000);
