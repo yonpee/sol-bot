@@ -18,13 +18,15 @@ const WATCH_TOKENS = [
 const CONFIG = {
   MIN_PRICE_CHANGE_5M: 1,
   MIN_SCORE: 40,
-  MAX_POSITIONS: 1,
   REQUEST_INTERVAL_MS: 600,
   RATE_LIMIT_WAIT_MS: 60000,
 };
 
-const purchasedTokens = new Set();
 let lastRateLimitTime = 0;
+
+function hasPosition(tokenAddress) {
+  return positions.some(function(p) { return p.tokenMint === tokenAddress; });
+}
 
 function analyzeToken(pair) {
   const priceChange5m = parseFloat(pair.priceChange?.m5 || 0);
@@ -51,7 +53,7 @@ function analyzeToken(pair) {
 
   if (liquidity < 100000) { score -= 30; reasons.push("流動性低"); }
 
-  return { score, reasons, priceChange5m, priceChange1h, priceChange24h };
+  return { score: score, reasons: reasons, priceChange5m: priceChange5m, priceChange1h: priceChange1h, priceChange24h: priceChange24h };
 }
 
 async function getTokenPrice(tokenAddress) {
@@ -65,14 +67,15 @@ async function getTokenPrice(tokenAddress) {
     );
     const data = response.data;
     if (!data.pairs || data.pairs.length === 0) return null;
-    const solanaPairs = data.pairs.filter(p => p.chainId === "solana");
+    const solanaPairs = data.pairs.filter(function(p) { return p.chainId === "solana"; });
     if (solanaPairs.length === 0) return null;
-    return solanaPairs.reduce((best, current) => {
+    return solanaPairs.reduce(function(best, current) {
       return parseFloat(current.liquidity?.usd || 0) > parseFloat(best.liquidity?.usd || 0)
         ? current : best;
     }, solanaPairs[0]);
   } catch (error) {
-    if (error.response?.status === 429) {
+    if (error.response && error.response.status === 429) {
+      console.log("DexScreenerレート制限 → 1分待機");
       lastRateLimitTime = Date.now();
     }
     return null;
@@ -92,9 +95,9 @@ async function sendBuyNotification(symbol, analysis, aiResult, txid, dexLink) {
         fields: [
           { name: "📈 5分変化", value: "+" + analysis.priceChange5m.toFixed(2) + "%", inline: true },
           { name: "📊 1時間変化", value: analysis.priceChange1h.toFixed(2) + "%", inline: true },
-          { name: "💵 金額", value: "$10相当のSOL", inline: true },
+          { name: "💵 金額", value: "$" + analysis.buyAmountUsd || "$10", inline: true },
           { name: "🎯 利確/損切り", value: "+8% / -4%", inline: true },
-          { name: "🤖 AI", value: (aiResult?.reason || "分析完了"), inline: true },
+          { name: "🤖 AI", value: (aiResult && aiResult.reason) ? aiResult.reason : "分析完了", inline: true },
           { name: "📊 理由", value: analysis.reasons.join(" / ") || "なし", inline: false },
           { name: "🔗 TX", value: "[確認](https://solscan.io/tx/" + txid + ")", inline: false },
           { name: "🔗 Chart", value: "[DexScreener](" + dexLink + ")", inline: false },
@@ -110,19 +113,20 @@ async function sendBuyNotification(symbol, analysis, aiResult, txid, dexLink) {
 async function checkTrends(solPriceUsd) {
   console.log("コイン監視中...");
 
-  if (positions.length >= CONFIG.MAX_POSITIONS) {
-    console.log("最大ポジション数に達しています");
-    return;
-  }
-
   const results = [];
 
-  for (const token of WATCH_TOKENS) {
-    if (purchasedTokens.has(token.address)) continue;
+  for (let i = 0; i < WATCH_TOKENS.length; i++) {
+    const token = WATCH_TOKENS[i];
+
+    // すでにそのコインのポジションがあればスキップ
+    if (hasPosition(token.address)) {
+      console.log(token.symbol + ": 保有中のためスキップ");
+      continue;
+    }
 
     const pair = await getTokenPrice(token.address);
     if (!pair) {
-      await new Promise((r) => setTimeout(r, CONFIG.REQUEST_INTERVAL_MS));
+      await new Promise(function(r) { setTimeout(r, CONFIG.REQUEST_INTERVAL_MS); });
       continue;
     }
 
@@ -130,10 +134,10 @@ async function checkTrends(solPriceUsd) {
     console.log(token.symbol + ": " + analysis.priceChange5m.toFixed(2) + "% | " + analysis.score + "点");
 
     if (analysis.score >= CONFIG.MIN_SCORE && analysis.priceChange5m >= CONFIG.MIN_PRICE_CHANGE_5M) {
-      results.push({ token, pair, analysis });
+      results.push({ token: token, pair: pair, analysis: analysis });
     }
 
-    await new Promise((r) => setTimeout(r, CONFIG.REQUEST_INTERVAL_MS));
+    await new Promise(function(r) { setTimeout(r, CONFIG.REQUEST_INTERVAL_MS); });
   }
 
   if (results.length === 0) {
@@ -141,14 +145,22 @@ async function checkTrends(solPriceUsd) {
     return;
   }
 
-  results.sort((a, b) => b.analysis.score - a.analysis.score);
+  results.sort(function(a, b) { return b.analysis.score - a.analysis.score; });
+  console.log("購入候補: " + results.length + "件");
 
-  for (const result of results) {
+  for (let j = 0; j < results.length; j++) {
+    const result = results[j];
+
+    // 購入直前にもう一度チェック
+    if (hasPosition(result.token.address)) {
+      console.log(result.token.symbol + ": 既に保有中");
+      continue;
+    }
+
     const tradeResult = await buyToken(result.token.address, solPriceUsd, false);
     if (tradeResult) {
       tradeResult.symbol = result.token.symbol;
       addPosition(tradeResult);
-      purchasedTokens.add(result.token.address);
       console.log("購入成功: " + result.token.symbol);
 
       addTradeHistory({
@@ -170,10 +182,12 @@ async function checkTrends(solPriceUsd) {
 
       const dexLink = "https://dexscreener.com/" + result.pair.chainId + "/" + result.pair.pairAddress;
       await sendBuyNotification(result.token.symbol, result.analysis, aiResult, tradeResult.txid, dexLink);
-      break;
+    } else {
+      console.log(result.token.symbol + ": 購入失敗 → 次の候補へ");
     }
-    await new Promise((r) => setTimeout(r, 500));
+
+    await new Promise(function(r) { setTimeout(r, 500); });
   }
 }
 
-module.exports = { checkTrends };
+module.exports = { checkTrends: checkTrends };
