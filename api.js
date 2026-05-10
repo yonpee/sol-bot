@@ -1,7 +1,9 @@
 const express = require("express");
 const cors = require("cors");
-const { Connection, PublicKey, LAMPORTS_PER_SOL } = require("@solana/web3.js");
+const { Connection, PublicKey, LAMPORTS_PER_SOL, Keypair } = require("@solana/web3.js");
 const bs58 = require("bs58");
+const { createClient } = require("@supabase/supabase-js");
+const ws = require("ws");
 
 const app = express();
 
@@ -23,6 +25,58 @@ let botConfig = {
   active: true,
 };
 
+function getSupabase() {
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_KEY;
+  if (!url || !key) return null;
+  return createClient(url, key, { realtime: { transport: ws } });
+}
+
+async function loadConfigFromSupabase() {
+  const supabase = getSupabase();
+  if (!supabase) return;
+  try {
+    const { data, error } = await supabase
+      .from("bot_config")
+      .select("*")
+      .limit(1);
+    if (error) throw error;
+    if (data && data.length > 0) {
+      const row = data[0];
+      botConfig.takeProfit = parseFloat(row.take_profit);
+      botConfig.stopLoss = parseFloat(row.stop_loss);
+      botConfig.buyAmount = parseFloat(row.buy_amount);
+      botConfig.minChange5m = parseFloat(row.min_change_5m);
+      botConfig.active = row.active;
+      console.log("Supabaseから設定復元: 購入金額$" + botConfig.buyAmount);
+    }
+  } catch (error) {
+    console.error("設定復元エラー:", error.message);
+  }
+}
+
+async function saveConfigToSupabase() {
+  const supabase = getSupabase();
+  if (!supabase) return;
+  try {
+    const { error } = await supabase
+      .from("bot_config")
+      .update({
+        take_profit: botConfig.takeProfit,
+        stop_loss: botConfig.stopLoss,
+        buy_amount: botConfig.buyAmount,
+        min_change_5m: botConfig.minChange5m,
+        active: botConfig.active,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", 1);
+    if (error) throw error;
+    console.log("設定をSupabaseに保存完了");
+  } catch (error) {
+    console.error("設定保存エラー:", error.message);
+  }
+}
+
 function getBotConfig() {
   return botConfig;
 }
@@ -41,19 +95,14 @@ function addTradeHistory(trade) {
   if (tradeHistory.length > 50) tradeHistory.pop();
 }
 
-function getConnection() {
-  const rpcUrl = process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
-  return new Connection(rpcUrl, "confirmed");
-}
-
 async function getWalletBalance() {
   try {
     const privateKey = process.env.WALLET_PRIVATE_KEY;
     if (!privateKey) return null;
     const secretKey = bs58.decode(privateKey);
-    const { Keypair } = require("@solana/web3.js");
     const wallet = Keypair.fromSecretKey(secretKey);
-    const connection = getConnection();
+    const rpcUrl = process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
+    const connection = new Connection(rpcUrl, "confirmed");
     const balance = await connection.getBalance(wallet.publicKey);
     return balance / LAMPORTS_PER_SOL;
   } catch (error) {
@@ -62,11 +111,11 @@ async function getWalletBalance() {
   }
 }
 
-app.get("/health", (req, res) => {
+app.get("/health", function(req, res) {
   res.json({ status: "ok", timestamp: Date.now() });
 });
 
-app.get("/status", async (req, res) => {
+app.get("/status", async function(req, res) {
   const { positions } = require("./portfolio");
   const solBalance = await getWalletBalance();
   res.json({
@@ -78,7 +127,7 @@ app.get("/status", async (req, res) => {
   });
 });
 
-app.get("/history", async (req, res) => {
+app.get("/history", async function(req, res) {
   try {
     const { loadHistoryFromSupabase } = require("./portfolio");
     const supabaseHistory = await loadHistoryFromSupabase();
@@ -104,7 +153,7 @@ app.get("/history", async (req, res) => {
   }
 });
 
-app.post("/config", (req, res) => {
+app.post("/config", async function(req, res) {
   const { takeProfit, stopLoss, buyAmount, minChange5m, active } = req.body;
   if (takeProfit !== undefined) botConfig.takeProfit = parseFloat(takeProfit);
   if (stopLoss !== undefined) botConfig.stopLoss = parseFloat(stopLoss);
@@ -112,10 +161,11 @@ app.post("/config", (req, res) => {
   if (minChange5m !== undefined) botConfig.minChange5m = parseFloat(minChange5m);
   if (active !== undefined) botConfig.active = active;
   console.log("設定変更:", JSON.stringify(botConfig));
+  await saveConfigToSupabase();
   res.json({ success: true, config: botConfig });
 });
 
-app.post("/manual-buy", async (req, res) => {
+app.post("/manual-buy", async function(req, res) {
   try {
     const { tokenAddress, symbol, takeProfit, stopLoss, amount } = req.body;
     if (!tokenAddress) {
@@ -187,22 +237,29 @@ app.post("/manual-buy", async (req, res) => {
   }
 });
 
-app.post("/manual-sell", async (req, res) => {
+app.post("/manual-sell", async function(req, res) {
   try {
     const { positions, removePosition } = require("./portfolio");
     const { sellToken } = require("./trader");
+    const { tokenMint } = req.body;
 
     if (positions.length === 0) {
       return res.status(400).json({ success: false, error: "ポジションがありません" });
     }
 
-    const position = positions[0];
-    console.log("手動売却開始:", position.tokenMint);
+    const position = tokenMint
+      ? positions.find(function(p) { return p.tokenMint === tokenMint; })
+      : positions[0];
 
+    if (!position) {
+      return res.status(400).json({ success: false, error: "指定のポジションが見つかりません" });
+    }
+
+    console.log("手動売却開始:", position.tokenMint);
     const result = await sellToken(position, 0, "手動売却");
 
     if (!result) {
-      return res.status(500).json({ success: false, error: "売却失敗（流動性不足の可能性）" });
+      return res.status(500).json({ success: false, error: "売却失敗" });
     }
 
     addTradeHistory({
@@ -234,11 +291,4 @@ app.post("/manual-sell", async (req, res) => {
   }
 });
 
-function startApi() {
-  const PORT = process.env.PORT || 3000;
-  app.listen(PORT, "0.0.0.0", function() {
-    console.log("API サーバー起動: port " + PORT);
-  });
-}
-
-module.exports = { startApi: startApi, addTradeHistory: addTradeHistory, botConfig: botConfig, getBotConfig: getBotConfig };
+async function start​​​​​​​​​​​​​​​​
