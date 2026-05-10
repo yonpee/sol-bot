@@ -1,6 +1,6 @@
 const express = require("express");
 const cors = require("cors");
-const { Connection, PublicKey, LAMPORTS_PER_SOL, Keypair } = require("@solana/web3.js");
+const { Connection, LAMPORTS_PER_SOL, Keypair } = require("@solana/web3.js");
 const bs58 = require("bs58");
 const { createClient } = require("@supabase/supabase-js");
 const ws = require("ws");
@@ -36,13 +36,10 @@ async function loadConfigFromSupabase() {
   const supabase = getSupabase();
   if (!supabase) return;
   try {
-    const { data, error } = await supabase
-      .from("bot_config")
-      .select("*")
-      .limit(1);
-    if (error) throw error;
-    if (data && data.length > 0) {
-      const row = data[0];
+    const res = await supabase.from("bot_config").select("*").limit(1);
+    if (res.error) throw res.error;
+    if (res.data && res.data.length > 0) {
+      const row = res.data[0];
       botConfig.takeProfit = parseFloat(row.take_profit);
       botConfig.stopLoss = parseFloat(row.stop_loss);
       botConfig.buyAmount = parseFloat(row.buy_amount);
@@ -59,18 +56,15 @@ async function saveConfigToSupabase() {
   const supabase = getSupabase();
   if (!supabase) return;
   try {
-    const { error } = await supabase
-      .from("bot_config")
-      .update({
-        take_profit: botConfig.takeProfit,
-        stop_loss: botConfig.stopLoss,
-        buy_amount: botConfig.buyAmount,
-        min_change_5m: botConfig.minChange5m,
-        active: botConfig.active,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", 1);
-    if (error) throw error;
+    const res = await supabase.from("bot_config").update({
+      take_profit: botConfig.takeProfit,
+      stop_loss: botConfig.stopLoss,
+      buy_amount: botConfig.buyAmount,
+      min_change_5m: botConfig.minChange5m,
+      active: botConfig.active,
+      updated_at: new Date().toISOString(),
+    }).eq("id", 1);
+    if (res.error) throw res.error;
     console.log("設定をSupabaseに保存完了");
   } catch (error) {
     console.error("設定保存エラー:", error.message);
@@ -154,12 +148,12 @@ app.get("/history", async function(req, res) {
 });
 
 app.post("/config", async function(req, res) {
-  const { takeProfit, stopLoss, buyAmount, minChange5m, active } = req.body;
-  if (takeProfit !== undefined) botConfig.takeProfit = parseFloat(takeProfit);
-  if (stopLoss !== undefined) botConfig.stopLoss = parseFloat(stopLoss);
-  if (buyAmount !== undefined) botConfig.buyAmount = parseFloat(buyAmount);
-  if (minChange5m !== undefined) botConfig.minChange5m = parseFloat(minChange5m);
-  if (active !== undefined) botConfig.active = active;
+  const body = req.body;
+  if (body.takeProfit !== undefined) botConfig.takeProfit = parseFloat(body.takeProfit);
+  if (body.stopLoss !== undefined) botConfig.stopLoss = parseFloat(body.stopLoss);
+  if (body.buyAmount !== undefined) botConfig.buyAmount = parseFloat(body.buyAmount);
+  if (body.minChange5m !== undefined) botConfig.minChange5m = parseFloat(body.minChange5m);
+  if (body.active !== undefined) botConfig.active = body.active;
   console.log("設定変更:", JSON.stringify(botConfig));
   await saveConfigToSupabase();
   res.json({ success: true, config: botConfig });
@@ -167,7 +161,13 @@ app.post("/config", async function(req, res) {
 
 app.post("/manual-buy", async function(req, res) {
   try {
-    const { tokenAddress, symbol, takeProfit, stopLoss, amount } = req.body;
+    const body = req.body;
+    const tokenAddress = body.tokenAddress;
+    const symbol = body.symbol;
+    const takeProfit = body.takeProfit;
+    const stopLoss = body.stopLoss;
+    const amount = body.amount;
+
     if (!tokenAddress) {
       return res.status(400).json({ success: false, error: "tokenAddressが必要です" });
     }
@@ -201,7 +201,7 @@ app.post("/manual-buy", async function(req, res) {
     botConfig.stopLoss = prevStopLoss;
 
     if (!tradeResult) {
-      return res.status(500).json({ success: false, error: "購入失敗（ルートなしまたは残高不足）" });
+      return res.status(500).json({ success: false, error: "購入失敗" });
     }
 
     tradeResult.symbol = symbol || tokenAddress.substring(0, 8);
@@ -241,7 +241,7 @@ app.post("/manual-sell", async function(req, res) {
   try {
     const { positions, removePosition } = require("./portfolio");
     const { sellToken } = require("./trader");
-    const { tokenMint } = req.body;
+    const tokenMint = req.body.tokenMint;
 
     if (positions.length === 0) {
       return res.status(400).json({ success: false, error: "ポジションがありません" });
@@ -291,4 +291,18 @@ app.post("/manual-sell", async function(req, res) {
   }
 });
 
-async function start​​​​​​​​​​​​​​​​
+function startApi() {
+  loadConfigFromSupabase().then(function() {
+    const PORT = process.env.PORT || 3000;
+    app.listen(PORT, "0.0.0.0", function() {
+      console.log("API サーバー起動: port " + PORT);
+    });
+  });
+}
+
+module.exports = {
+  startApi: startApi,
+  addTradeHistory: addTradeHistory,
+  botConfig: botConfig,
+  getBotConfig: getBotConfig,
+};
