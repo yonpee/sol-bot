@@ -1,5 +1,7 @@
 const express = require("express");
 const cors = require("cors");
+const { Connection, PublicKey, LAMPORTS_PER_SOL } = require("@solana/web3.js");
+const bs58 = require("bs58");
 
 const app = express();
 
@@ -39,17 +41,40 @@ function addTradeHistory(trade) {
   if (tradeHistory.length > 50) tradeHistory.pop();
 }
 
+function getConnection() {
+  const rpcUrl = process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
+  return new Connection(rpcUrl, "confirmed");
+}
+
+async function getWalletBalance() {
+  try {
+    const privateKey = process.env.WALLET_PRIVATE_KEY;
+    if (!privateKey) return null;
+    const secretKey = bs58.decode(privateKey);
+    const { Keypair } = require("@solana/web3.js");
+    const wallet = Keypair.fromSecretKey(secretKey);
+    const connection = getConnection();
+    const balance = await connection.getBalance(wallet.publicKey);
+    return balance / LAMPORTS_PER_SOL;
+  } catch (error) {
+    console.error("残高取得エラー:", error.message);
+    return null;
+  }
+}
+
 app.get("/health", (req, res) => {
   res.json({ status: "ok", timestamp: Date.now() });
 });
 
-app.get("/status", (req, res) => {
+app.get("/status", async (req, res) => {
   const { positions } = require("./portfolio");
+  const solBalance = await getWalletBalance();
   res.json({
     active: botConfig.active,
     positions: positions,
     positionCount: positions.length,
     config: botConfig,
+    solBalance: solBalance,
   });
 });
 
@@ -58,16 +83,18 @@ app.get("/history", async (req, res) => {
     const { loadHistoryFromSupabase } = require("./portfolio");
     const supabaseHistory = await loadHistoryFromSupabase();
     if (supabaseHistory.length > 0) {
-      const formatted = supabaseHistory.map(h => ({
-        id: h.id,
-        symbol: h.symbol,
-        type: h.type,
-        amount: parseFloat(h.amount || 0),
-        profit: h.profit !== null ? parseFloat(h.profit) : null,
-        reason: h.reason,
-        txid: h.txid,
-        timestamp: new Date(h.created_at).toLocaleTimeString("ja-JP", { timeZone: "Asia/Tokyo" }),
-      }));
+      const formatted = supabaseHistory.map(function(h) {
+        return {
+          id: h.id,
+          symbol: h.symbol,
+          type: h.type,
+          amount: parseFloat(h.amount || 0),
+          profit: h.profit !== null ? parseFloat(h.profit) : null,
+          reason: h.reason,
+          txid: h.txid,
+          timestamp: new Date(h.created_at).toLocaleTimeString("ja-JP", { timeZone: "Asia/Tokyo" }),
+        };
+      });
       res.json({ history: formatted });
     } else {
       res.json({ history: tradeHistory });
@@ -99,8 +126,9 @@ app.post("/manual-buy", async (req, res) => {
     const { buyToken } = require("./trader");
     const { addPosition, positions } = require("./portfolio");
 
-    if (positions.length >= 1) {
-      return res.status(400).json({ success: false, error: "既にポジションがあります" });
+    const alreadyHas = positions.some(function(p) { return p.tokenMint === tokenAddress; });
+    if (alreadyHas) {
+      return res.status(400).json({ success: false, error: "既にこのコインのポジションがあります" });
     }
 
     const priceData = await getSolanaPrice();
@@ -108,7 +136,6 @@ app.post("/manual-buy", async (req, res) => {
       return res.status(500).json({ success: false, error: "SOL価格取得失敗" });
     }
 
-    // 手動購入時の設定を一時的に上書き
     const prevAmount = botConfig.buyAmount;
     const prevTakeProfit = botConfig.takeProfit;
     const prevStopLoss = botConfig.stopLoss;
@@ -119,7 +146,6 @@ app.post("/manual-buy", async (req, res) => {
     console.log("手動購入開始:", tokenAddress);
     const tradeResult = await buyToken(tokenAddress, priceData.price, false);
 
-    // 設定を元に戻す
     botConfig.buyAmount = prevAmount;
     botConfig.takeProfit = prevTakeProfit;
     botConfig.stopLoss = prevStopLoss;
@@ -199,7 +225,6 @@ app.post("/manual-sell", async (req, res) => {
     });
 
     removePosition(position.tokenMint);
-
     console.log("手動売却成功:", result.txid);
     res.json({ success: true, txid: result.txid });
 
@@ -211,9 +236,9 @@ app.post("/manual-sell", async (req, res) => {
 
 function startApi() {
   const PORT = process.env.PORT || 3000;
-  app.listen(PORT, "0.0.0.0", () => {
+  app.listen(PORT, "0.0.0.0", function() {
     console.log("API サーバー起動: port " + PORT);
   });
 }
 
-module.exports = { startApi, addTradeHistory, botConfig, getBotConfig };
+module.exports = { startApi: startApi, addTradeHistory: addTradeHistory, botConfig: botConfig, getBotConfig: getBotConfig };
