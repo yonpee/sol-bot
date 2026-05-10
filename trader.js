@@ -168,15 +168,41 @@ async function buyToken(tokenMint, solPriceUsd, isPumpFun = false) {
     if (!transactions || transactions.length === 0) return null;
 
     let txid = null;
+    let confirmed = false;
+
     for (const txData of transactions) {
       const buf = Buffer.from(txData.transaction, "base64");
       const tx = VersionedTransaction.deserialize(buf);
       tx.sign([wallet]);
+
+      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
+
       txid = await connection.sendRawTransaction(tx.serialize(), {
         skipPreflight: true, maxRetries: 3,
       });
-      console.log("購入成功! TX:", txid);
+      console.log("TX送信: " + txid);
+
+      // トランザクション確認を待つ
+      try {
+        const result = await connection.confirmTransaction({
+          signature: txid,
+          blockhash: blockhash,
+          lastValidBlockHeight: lastValidBlockHeight,
+        }, "confirmed");
+
+        if (result.value.err) {
+          console.error("TX確認エラー:", result.value.err);
+          return null;
+        }
+        confirmed = true;
+        console.log("購入確認完了! TX:", txid);
+      } catch (confirmError) {
+        console.error("TX確認タイムアウト:", confirmError.message);
+        return null;
+      }
     }
+
+    if (!confirmed) return null;
 
     const outputAmountRaw = parseFloat(quote?.data?.outputAmount || 1);
     const decimals = TOKEN_DECIMALS[tokenMint] || 6;
@@ -211,7 +237,6 @@ async function sellToken(position, currentPrice, reason) {
     const wallet = getWallet();
     const connection = getConnection();
 
-    // トークンアカウントのATAアドレスを取得
     const ata = await getOrCreateTokenAccount(connection, wallet, position.tokenMint);
     if (!ata) {
       console.error("トークンアカウント取得失敗");
@@ -220,7 +245,6 @@ async function sellToken(position, currentPrice, reason) {
 
     console.log("売却元ATA: " + ata.toString());
 
-    // 3回リトライ
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
         await new Promise(r => setTimeout(r, 1000));
@@ -267,13 +291,32 @@ async function sellToken(position, currentPrice, reason) {
           const buf = Buffer.from(txData.transaction, "base64");
           const tx = VersionedTransaction.deserialize(buf);
           tx.sign([wallet]);
+
+          const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
+
           txid = await connection.sendRawTransaction(tx.serialize(), {
             skipPreflight: true, maxRetries: 3,
           });
-          console.log("売却成功! TX:", txid);
-        }
+          console.log("売却TX送信: " + txid);
 
-        return { txid, reason, currentPrice };
+          try {
+            const result = await connection.confirmTransaction({
+              signature: txid,
+              blockhash: blockhash,
+              lastValidBlockHeight: lastValidBlockHeight,
+            }, "confirmed");
+
+            if (result.value.err) {
+              console.error("売却TX確認エラー:", result.value.err);
+              continue;
+            }
+            console.log("売却確認完了! TX:", txid);
+            return { txid, reason, currentPrice };
+          } catch (confirmError) {
+            console.error("売却TX確認タイムアウト:", confirmError.message);
+            continue;
+          }
+        }
 
       } catch (e) {
         console.error("売却試行" + attempt + "エラー:", e.message);
