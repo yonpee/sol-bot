@@ -21,6 +21,10 @@ let botConfig = {
   active: true,
 };
 
+function getBotConfig() {
+  return botConfig;
+}
+
 function addTradeHistory(trade) {
   tradeHistory.unshift({
     id: Date.now(),
@@ -53,7 +57,6 @@ app.get("/history", async (req, res) => {
   try {
     const { loadHistoryFromSupabase } = require("./portfolio");
     const supabaseHistory = await loadHistoryFromSupabase();
-
     if (supabaseHistory.length > 0) {
       const formatted = supabaseHistory.map(h => ({
         id: h.id,
@@ -93,7 +96,7 @@ app.post("/manual-buy", async (req, res) => {
     }
 
     const { getSolanaPrice } = require("./priceChecker");
-    const { buyToken, TRADE_CONFIG } = require("./trader");
+    const { buyToken } = require("./trader");
     const { addPosition, positions } = require("./portfolio");
 
     if (positions.length >= 1) {
@@ -105,14 +108,21 @@ app.post("/manual-buy", async (req, res) => {
       return res.status(500).json({ success: false, error: "SOL価格取得失敗" });
     }
 
-    // 購入金額を一時的に変更
-    const originalAmount = TRADE_CONFIG.BUY_AMOUNT_USD;
-    if (amount) TRADE_CONFIG.BUY_AMOUNT_USD = parseFloat(amount);
+    // 手動購入時の設定を一時的に上書き
+    const prevAmount = botConfig.buyAmount;
+    const prevTakeProfit = botConfig.takeProfit;
+    const prevStopLoss = botConfig.stopLoss;
+    if (amount) botConfig.buyAmount = parseFloat(amount);
+    if (takeProfit) botConfig.takeProfit = parseFloat(takeProfit);
+    if (stopLoss) botConfig.stopLoss = parseFloat(stopLoss);
 
     console.log("手動購入開始:", tokenAddress);
     const tradeResult = await buyToken(tokenAddress, priceData.price, false);
 
-    TRADE_CONFIG.BUY_AMOUNT_USD = originalAmount;
+    // 設定を元に戻す
+    botConfig.buyAmount = prevAmount;
+    botConfig.takeProfit = prevTakeProfit;
+    botConfig.stopLoss = prevStopLoss;
 
     if (!tradeResult) {
       return res.status(500).json({ success: false, error: "購入失敗（ルートなしまたは残高不足）" });
@@ -133,16 +143,14 @@ app.post("/manual-buy", async (req, res) => {
     });
 
     const { saveHistoryToSupabase } = require("./portfolio");
-    if (saveHistoryToSupabase) {
-      await saveHistoryToSupabase({
-        symbol: tradeResult.symbol,
-        type: "buy",
-        amount: tradeResult.buyAmountUsd,
-        profit: null,
-        reason: "手動購入",
-        txid: tradeResult.txid,
-      });
-    }
+    await saveHistoryToSupabase({
+      symbol: tradeResult.symbol,
+      type: "buy",
+      amount: tradeResult.buyAmountUsd,
+      profit: null,
+      reason: "手動購入",
+      txid: tradeResult.txid,
+    });
 
     console.log("手動購入成功:", tradeResult.txid);
     res.json({ success: true, txid: tradeResult.txid });
@@ -181,16 +189,14 @@ app.post("/manual-sell", async (req, res) => {
     });
 
     const { saveHistoryToSupabase } = require("./portfolio");
-    if (saveHistoryToSupabase) {
-      await saveHistoryToSupabase({
-        symbol: position.symbol || "不明",
-        type: "sell",
-        amount: position.buyAmountUsd,
-        profit: null,
-        reason: "手動売却",
-        txid: result.txid,
-      });
-    }
+    await saveHistoryToSupabase({
+      symbol: position.symbol || "不明",
+      type: "sell",
+      amount: position.buyAmountUsd,
+      profit: null,
+      reason: "手動売却",
+      txid: result.txid,
+    });
 
     removePosition(position.tokenMint);
 
@@ -210,4 +216,4 @@ function startApi() {
   });
 }
 
-module.exports = { startApi, addTradeHistory, botConfig };
+module.exports = { startApi, addTradeHistory, botConfig, getBotConfig };
